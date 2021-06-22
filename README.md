@@ -10,6 +10,10 @@ Support
 
 Support on IRC at irc://libera.chat/binaergewitter
 
+
+Features
+==
+
 - **Recording** from any real, or virtual audio device that is available to the host system.
 - **Export / Import** a wide range of audio formats, extendible with FFmpeg.
 - **High quality** using 32-bit float audio processing.
