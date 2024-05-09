@@ -3,7 +3,7 @@ add_library( ${TARGET} STATIC )
 
 def_vars()
 
-list( APPEND SOURCES
+set( SOURCES
    PRIVATE
       ${TARGET_ROOT}/allegro.cpp
       ${TARGET_ROOT}/allegrord.cpp
@@ -15,12 +15,13 @@ list( APPEND SOURCES
       ${TARGET_ROOT}/strparse.cpp
 )
 
-list( APPEND INCLUDES
+set( INCLUDES
    PUBLIC
-      ${TARGET_ROOT}/include
+      ${TARGET_ROOT}
 )
 
 organize_source( "${TARGET_ROOT}" "" "${SOURCES}" )
 target_sources( ${TARGET} PRIVATE ${SOURCES} )
 target_include_directories( ${TARGET} PRIVATE ${INCLUDES} )
 
+set_target_properties(${TARGET} PROPERTIES POSITION_INDEPENDENT_CODE On)

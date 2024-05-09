@@ -29,13 +29,15 @@ public:
    static const ComponentInterfaceSymbol Symbol;
 
    // ComponentInterface overrides
-   ComponentInterfaceSymbol GetSymbol() override {return Symbol;}
-   TranslatableString  GetDescription() override {return XO("Compares a range on two tracks.");};
-   bool DefineParams( ShuttleParams & S ) override;
+   ComponentInterfaceSymbol GetSymbol() const override {return Symbol;}
+   TranslatableString  GetDescription() const override {return XO("Compares a range on two tracks.");};
+   template<bool Const> bool VisitSettings( SettingsVisitorBase<Const> &S );
+   bool VisitSettings( SettingsVisitor & S ) override;
+   bool VisitSettings( ConstSettingsVisitor & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_II#compare_Audio");};
+   ManualPageID ManualPage() override {return L"Extra_Menu:_Scriptables_II#compare_Audio";}
    bool Apply(const CommandContext &context) override;
 
 

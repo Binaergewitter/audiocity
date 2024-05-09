@@ -16,6 +16,7 @@
 
 #include "BatchCommands.h"
 #include "Prefs.h"
+#include "wxPanelWrapper.h"
 
 class wxWindow;
 class wxTextCtrl;
@@ -41,7 +42,7 @@ class ApplyMacroDialog : public wxDialogWrapper {
    virtual void OnCancel(wxCommandEvent & event);
    virtual void OnHelp(wxCommandEvent & event);
 
-   virtual wxString GetHelpPageName() {return "Apply_Macro";};
+   virtual ManualPageID GetHelpPageName() {return "Apply_Macro";}
 
    void PopulateMacros();
    static CommandID MacroIdOfName( const wxString & MacroName );
@@ -87,9 +88,9 @@ private:
    void OnApplyToFiles(wxCommandEvent & event) override;
    void OnCancel(wxCommandEvent &event) override;
 
-   virtual wxString GetHelpPageName() override {return 
+   virtual ManualPageID GetHelpPageName() override {return 
       mbExpanded ? "Manage_Macros"
-         : "Apply_Macro";};
+         : "Apply_Macro";}
 
    void PopulateList();
    void AddItem(const CommandID &command, wxString const &params);
@@ -138,6 +139,7 @@ private:
    wxButton *mRestore;
    wxButton *mImport;
    wxButton *mExport;
+   wxButton *mEdit;
    wxButton *mSave;
 
    int mSelectedCommand;

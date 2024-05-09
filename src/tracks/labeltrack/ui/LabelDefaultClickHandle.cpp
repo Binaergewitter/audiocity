@@ -8,7 +8,7 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../../Audacity.h"
+
 #include "LabelDefaultClickHandle.h"
 
 #include "LabelTrackView.h"
@@ -16,6 +16,7 @@ Paul Licameli split from TrackPanel.cpp
 #include "../../../LabelTrack.h"
 #include "../../../RefreshCode.h"
 #include "../../../TrackPanelMouseEvent.h"
+#include <wx/event.h>
 
 LabelDefaultClickHandle::LabelDefaultClickHandle()
 {
@@ -68,11 +69,10 @@ UIHandle::Result LabelDefaultClickHandle::Click
       SaveState( pProject );
 
       const auto pLT = evt.pCell.get();
-      for (auto lt : TrackList::Get( *pProject ).Any<LabelTrack>()) {
-         if (pLT != &TrackView::Get( *lt )) {
+      for (auto lt : TrackList::Get(*pProject).Any<LabelTrack>()) {
+         if (pLT != &ChannelView::Get(*lt)) {
             auto &view = LabelTrackView::Get( *lt );
             view.ResetFlags();
-            view.SetSelectedIndex( -1 );
          }
       }
    }

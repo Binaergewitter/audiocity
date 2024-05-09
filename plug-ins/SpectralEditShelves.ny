@@ -2,24 +2,23 @@ $nyquist plug-in
 $version 4
 $type process spectral
 $preview linear
-$name (_ "Spectral edit shelves")
-$manpage "Spectral_edit_shelves"
-$action (_ "Filtering...")
+$name (_ "Spectral Edit Shelves")
+$debugbutton false
 $author (_ "Paul Licameli")
-$release 2.3.0
-$copyright (_ "Released under terms of the GNU General Public License version 2")
+$release 2.3.0-2
+$copyright (_ "GNU General Public License v2.0 or later")
 
-
-;; SpectralEditShelves.ny by Paul Licameli, November 2014.
-;; Updated by Steve Daulton 2014 / 2015.
-
-;; Released under terms of the GNU General Public License version 2:
+;; License: GPL v2+
 ;; http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 ;;
 ;; For information about writing and modifying Nyquist plug-ins:
 ;; https://wiki.audacityteam.org/wiki/Nyquist_Plug-ins_Reference
 
-$control control-gain (_ "Gain (dB)") real "" 0 -24 24
+;; SpectralEditShelves.ny by Paul Licameli, November 2014.
+;; Updated by Steve Daulton 2014 / 2015.
+
+
+$control CONTROL-GAIN (_ "Gain (dB)") real "" 0 -24 24
 
 (defmacro validate (hz)
 "If frequency is above Nyquist, don't use it"
@@ -68,11 +67,11 @@ $control control-gain (_ "Gain (dB)") real "" 0 -24 24
           (if f1 (validate f1))
           (if (not (or f0 f1))  ; 'validate' may return nil
               nil               ; Do nothing
-              (sum (prod env (wet sig control-gain f0 f1))
+              (sum (prod env (wet sig CONTROL-GAIN f0 f1))
                   (prod (diff 1.0 env) sig)))))))
 
 (catch 'error-message
   (setf p-err (format nil (_ "Error.~%")))
-  (if (= control-gain 0)
-      nil ; Do nothing
+  (if (= CONTROL-GAIN 0)
+      "" ; No-op
       (multichan-expand #'result *track*)))

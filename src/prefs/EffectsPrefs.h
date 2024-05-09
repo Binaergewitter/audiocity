@@ -27,16 +27,18 @@ class EffectsPrefs final : public PrefsPanel
  public:
    EffectsPrefs(wxWindow * parent, wxWindowID winid);
    ~EffectsPrefs();
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
 
    bool Commit() override;
-   wxString HelpPageName() override;
+   ManualPageID HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
  private:
    void Populate();
 };
 
-extern ChoiceSetting EffectsGroupBy;
+AUDACITY_DLL_API extern BoolSetting   SkipEffectsScanAtStartup;
+AUDACITY_DLL_API extern ChoiceSetting EffectsGroupBy;
+AUDACITY_DLL_API extern ChoiceSetting RealtimeEffectsGroupBy;
 #endif

@@ -19,7 +19,7 @@ class ZoomInfo;
 
 // A class that holds state for the duration of dragging
 // of an envelope point.
-class EnvelopeEditor
+class AUDACITY_DLL_API EnvelopeEditor
 {
 public:
    static void DrawPoints(
@@ -27,7 +27,7 @@ public:
       TrackPanelDrawingContext &context,
       const wxRect & r,
       bool dB, double dBRange,
-      float zoomMin, float zoomMax, bool mirrored);
+      float zoomMin, float zoomMax, bool mirrored, int origin = 0);
 
    EnvelopeEditor(Envelope &envelope, bool mirrored);
    ~EnvelopeEditor();

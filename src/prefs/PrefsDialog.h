@@ -14,23 +14,18 @@
 
 #include <functional>
 #include <vector>
-#include "../widgets/wxPanelWrapper.h" // to inherit
+#include "wxPanelWrapper.h" // to inherit
 #include "PrefsPanel.h"
 
 class AudacityProject;
 class wxTreebook;
 class wxTreeEvent;
+class SettingTransaction;
 class ShuttleGui;
-
-#ifdef __GNUC__
-#define CONST
-#else
-#define CONST const
-#endif
 
 class AudacityProject;
 
-class PrefsDialog /* not final */ : public wxDialogWrapper
+class AUDACITY_DLL_API PrefsDialog /* not final */ : public wxDialogWrapper
 {
  public:
    PrefsDialog(wxWindow * parent,
@@ -72,14 +67,19 @@ private:
    PrefsPanel::Factories &mFactories;
    const TranslatableString mTitlePrefix;
 
+   std::unique_ptr< SettingTransaction > mTransaction;
+
    DECLARE_EVENT_TABLE()
 };
 
 // This adds code appropriate only to the original use of PrefsDialog for
 // global settings -- not its reuses elsewhere as in View Settings
-class GlobalPrefsDialog final : public PrefsDialog
+class AUDACITY_DLL_API GlobalPrefsDialog final : public PrefsDialog
 {
 public:
+   /*!
+    @param pProject may be null
+    */
    GlobalPrefsDialog(
       wxWindow * parent, AudacityProject *pProject,
       PrefsPanel::Factories &factories =
@@ -90,6 +90,6 @@ public:
 };
 
 class AudacityProject;
-void DoReloadPreferences( AudacityProject &project );
+void AUDACITY_DLL_API DoReloadPreferences( AudacityProject &project );
 
 #endif

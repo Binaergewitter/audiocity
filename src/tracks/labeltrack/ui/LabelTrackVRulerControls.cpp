@@ -8,12 +8,12 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../../Audacity.h"
+
 #include "LabelTrackVRulerControls.h"
 
 #include "../../../HitTestResult.h"
 
-#include "../../../AColor.h"
+#include "AColor.h"
 #include "../../../TrackArtist.h"
 #include "../../../TrackPanelDrawingContext.h"
 
@@ -25,7 +25,7 @@ void LabelTrackVRulerControls::Draw(
    TrackPanelDrawingContext &context,
    const wxRect &rect_, unsigned iPass )
 {
-   TrackVRulerControls::Draw( context, rect_, iPass );
+   ChannelVRulerControls::Draw(context, rect_, iPass);
 
    // Draw on a later pass because the bevel overpaints one pixel
    // out of bounds on the bottom

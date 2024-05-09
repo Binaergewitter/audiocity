@@ -17,7 +17,10 @@ Vaughan Johnson (Preview)
 
 #include "Biquad.h"
 
-#include "Effect.h"
+#include "StatefulPerTrackEffect.h"
+#include "ShuttleAutomation.h"
+#include "wxPanelWrapper.h"
+#include <float.h> // for FLT_MAX
 
 class wxBitmap;
 class wxChoice;
@@ -29,9 +32,11 @@ class ShuttleGui;
 
 class EffectScienFilterPanel;
 
-class EffectScienFilter final : public Effect
+class EffectScienFilter final : public StatefulPerTrackEffect
 {
 public:
+   static inline EffectScienFilter *
+   FetchParameters(EffectScienFilter &e, EffectSettings &) { return &e; }
    static const ComponentInterfaceSymbol Symbol;
 
    EffectScienFilter();
@@ -39,31 +44,30 @@ public:
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
-   wxString ManualPage() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+   ManualPageID ManualPage() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
+   EffectType GetType() const override;
 
-   // EffectClientInterface implementation
-
-   unsigned GetAudioInCount() override;
-   unsigned GetAudioOutCount() override;
-   bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
-   size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
-   bool DefineParams( ShuttleParams & S ) override;
-   bool GetAutomationParameters(CommandParameters & parms) override;
-   bool SetAutomationParameters(CommandParameters & parms) override;
+   unsigned GetAudioInCount() const override;
+   unsigned GetAudioOutCount() const override;
+   bool ProcessInitialize(EffectSettings &settings, double sampleRate,
+      ChannelNames chanMap) override;
+   size_t ProcessBlock(EffectSettings &settings,
+      const float *const *inBlock, float *const *outBlock, size_t blockLen)
+      override;
 
    // Effect implementation
 
-   bool Startup() override;
    bool Init() override;
-   void PopulateOrExchange(ShuttleGui & S) override;
-   bool TransferDataToWindow() override;
-   bool TransferDataFromWindow() override;
+   std::unique_ptr<EffectEditor> PopulateOrExchange(
+      ShuttleGui & S, EffectInstance &instance,
+      EffectSettingsAccess &access, const EffectOutputs *pOutputs) override;
+   bool TransferDataToWindow(const EffectSettings &settings) override;
+   bool TransferDataFromWindow(EffectSettings &settings) override;
 
 private:
    // EffectScienFilter implementation
@@ -86,7 +90,8 @@ private:
    void OnSliderDBMAX( wxCommandEvent & evt );
    void OnSliderDBMIN( wxCommandEvent & evt );
 
-private:
+   wxWeakRef<wxWindow> mUIParent{};
+
    float mCutoff;
    float mRipple;
    float mStopbandRipple;
@@ -124,9 +129,42 @@ private:
    RulerPanel *mdBRuler;
    RulerPanel *mfreqRuler;
 
+   const EffectParameterMethods& Parameters() const override;
    DECLARE_EVENT_TABLE()
 
    friend class EffectScienFilterPanel;
+
+   enum kSubTypes
+   {
+      kLowPass  = Biquad::kLowPass,
+      kHighPass = Biquad::kHighPass,
+      nSubTypes = Biquad::nSubTypes
+   };
+   static const EnumValueSymbol kSubTypeStrings[nSubTypes];
+
+   enum kTypes
+   {
+      kButterworth,
+      kChebyshevTypeI,
+      kChebyshevTypeII,
+      nTypes
+   };
+   static const EnumValueSymbol kTypeStrings[nTypes];
+
+   static_assert(nSubTypes == WXSIZEOF(kSubTypeStrings), "size mismatch");
+
+static constexpr EnumParameter Type{ &EffectScienFilter::mFilterType,
+   L"FilterType",       kButterworth,  0,    nTypes - 1,    1, kTypeStrings, nTypes  };
+static constexpr EnumParameter Subtype{ &EffectScienFilter::mFilterSubtype,
+   L"FilterSubtype",    kLowPass,      0,    nSubTypes - 1, 1, kSubTypeStrings, nSubTypes  };
+static constexpr EffectParameter Order{ &EffectScienFilter::mOrder,
+   L"Order",            1,             1,    10,               1  };
+static constexpr EffectParameter Cutoff{ &EffectScienFilter::mCutoff,
+   L"Cutoff",           1000.0f,        1.0,  FLT_MAX,          1  };
+static constexpr EffectParameter Passband{ &EffectScienFilter::mRipple,
+   L"PassbandRipple",   1.0f,           0.0,  100.0,            1  };
+static constexpr EffectParameter Stopband{ &EffectScienFilter::mStopbandRipple,
+   L"StopbandRipple",   30.0f,          0.0,  100.0,            1  };
 };
 
 class EffectScienFilterPanel final : public wxPanelWrapper

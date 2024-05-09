@@ -17,40 +17,27 @@
 
 #include "PrefsPanel.h"
 
-class wxChoice;
-class wxTextCtrl;
 class ShuttleGui;
-enum sampleFormat : unsigned;
+enum class sampleFormat : unsigned;
 enum DitherType : unsigned;
 
 #define QUALITY_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Quality") }
 
-class QualityPrefs final : public PrefsPanel
+class AUDACITY_DLL_API QualityPrefs final : public PrefsPanel
 {
  public:
    QualityPrefs(wxWindow * parent, wxWindowID winid);
    virtual ~QualityPrefs();
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
 
    bool Commit() override;
-   wxString HelpPageName() override;
+   ManualPageID HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
-
-   static sampleFormat SampleFormatChoice();
 
  private:
    void Populate();
-   void GetNamesAndLabels();
-   void OnSampleRateChoice(wxCommandEvent & e);
-
-   TranslatableStrings mSampleRateNames;
-   std::vector<int> mSampleRateLabels;
-
-   wxChoice *mSampleRates;
-   wxTextCtrl *mOtherSampleRate;
-   int mOtherSampleRateValue;
-
+   
    DECLARE_EVENT_TABLE()
 };
 

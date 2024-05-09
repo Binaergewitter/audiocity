@@ -49,6 +49,7 @@
 #ifndef ALLEGRO_H
 #define ALLEGRO_H
 #include <assert.h>
+#include <cstdint>
 #include <istream>
 #include <ostream>
 
@@ -92,7 +93,7 @@ public:
         }
         if (atoms) delete [] atoms;
     }
-    // insert/lookup an atttribute
+    // insert/lookup an attribute
     Alg_attribute insert_attribute(Alg_attribute attr);
     // insert/lookup attribute by name (without prefixed type)
     Alg_attribute insert_string(const char *name);

@@ -14,44 +14,41 @@
 processing.  See also MacrosWindow and ApplyMacroDialog.
 
 *//*******************************************************************/
-
 #define wxLOG_COMPONENT "MacroCommands"
 
-#include "Audacity.h" // for USE_* macros
 #include "BatchCommands.h"
 
 #include <wx/defs.h>
 #include <wx/datetime.h>
 #include <wx/dir.h>
+#include <wx/log.h>
 #include <wx/textfile.h>
 #include <wx/time.h>
 
 #include "Project.h"
-#include "ProjectAudioManager.h"
 #include "ProjectHistory.h"
 #include "ProjectSettings.h"
-#include "ProjectWindow.h"
-#include "commands/CommandManager.h"
 #include "effects/EffectManager.h"
 #include "effects/EffectUI.h"
 #include "FileNames.h"
-#include "Menus.h"
 #include "PluginManager.h"
 #include "Prefs.h"
+#include "SelectFile.h"
 #include "SelectUtilities.h"
-#include "Shuttle.h"
+#include "SettingsVisitor.h"
 #include "Track.h"
 #include "UndoManager.h"
 
 #include "AllThemeResources.h"
 
-#include "widgets/AudacityMessageBox.h"
+#include "AudacityMessageBox.h"
 
-#include "commands/CommandContext.h"
+#include "CommandContext.h"
+#include "commands/CommandDispatch.h"
+#include "CommandManager.h"
 
 MacroCommands::MacroCommands( AudacityProject &project )
 : mProject{ project }
-, mExporter{ project }
 {
    ResetMacro();
 
@@ -129,7 +126,7 @@ wxString MacroCommands::ReadMacro(const wxString & macro, wxWindow *parent)
 
    // But, ask the user for the real name if we're importing
    if (parent) {
-      FilePath fn = FileNames::SelectFile(FileNames::Operation::_None,
+      FilePath fn = SelectFile(FileNames::Operation::_None,
          XO("Import Macro"),
          wxEmptyString,
          name.GetName(),
@@ -208,7 +205,7 @@ wxString MacroCommands::WriteMacro(const wxString & macro, wxWindow *parent)
 
    // But, ask the user for the real name if we're exporting
    if (parent) {
-      FilePath fn = FileNames::SelectFile(FileNames::Operation::_None,
+      FilePath fn = SelectFile(FileNames::Operation::_None,
          XO("Export Macro"),
          wxEmptyString,
          name.GetName(),
@@ -308,17 +305,15 @@ MacroCommandsCatalog::MacroCommandsCatalog( const AudacityProject *project )
    PluginManager & pm = PluginManager::Get();
    EffectManager & em = EffectManager::Get();
    {
-      const PluginDescriptor *plug = pm.GetFirstPlugin(PluginTypeEffect|PluginTypeAudacityCommand);
-      while (plug)
-      {
-         auto command = em.GetCommandIdentifier(plug->GetID());
+      for (auto &plug
+           : pm.PluginsOfType(PluginTypeEffect|PluginTypeAudacityCommand)) {
+         auto command = em.GetCommandIdentifier(plug.GetID());
          if (!command.empty())
             commands.push_back( {
-               { command, plug->GetSymbol().Msgid() },
-               plug->GetPluginType() == PluginTypeEffect ?
+               { command, plug.GetSymbol().Msgid() },
+               plug.GetPluginType() == PluginTypeEffect ?
                   XO("Effect") : XO("Menu Command (With Parameters)")
             } );
-         plug = pm.GetNextPlugin(PluginTypeEffect|PluginTypeAudacityCommand);
       }
    }
 
@@ -432,6 +427,15 @@ auto MacroCommandsCatalog::ByCommandId( const CommandID &commandId ) const
          { return entry.name.Internal() == commandId; });
 }
 
+// linear search
+auto MacroCommandsCatalog::ByTranslation(const wxString &translation) const
+   -> Entries::const_iterator
+{
+   return std::find_if(begin(), end(),
+      [&](const Entry& entry)
+      { return entry.name.Translation() == translation; });
+}
+
 wxString MacroCommands::GetCurrentParamsFor(const CommandID & command)
 {
    const PluginID & ID =
@@ -450,22 +454,13 @@ wxString MacroCommands::PromptForParamsFor(
    const PluginID & ID =
       EffectManager::Get().GetEffectByIdentifier(command);
    if (ID.empty())
-   {
       return wxEmptyString;   // effect not found
-   }
 
    wxString res = params;
-
    auto cleanup = EffectManager::Get().SetBatchProcessing(ID);
-
    if (EffectManager::Get().SetEffectParameters(ID, params))
-   {
       if (EffectManager::Get().PromptUser(ID, EffectUI::DialogFactory, parent))
-      {
          res = EffectManager::Get().GetEffectParameters(ID);
-      }
-   }
-
    return res;
 }
 
@@ -488,49 +483,6 @@ wxString MacroCommands::PromptForPresetFor(const CommandID & command, const wxSt
    }
 
    return preset;
-}
-
-/// DoAudacityCommand() takes a PluginID and executes the associated command.
-///
-/// At the moment flags are used only to indicate whether to prompt for
-/// parameters
-bool MacroCommands::DoAudacityCommand(
-   const PluginID & ID, const CommandContext & context, unsigned flags )
-{
-   auto &project = context.project;
-   auto &window = ProjectWindow::Get( project );
-   const PluginDescriptor *plug = PluginManager::Get().GetPlugin(ID);
-   if (!plug)
-      return false;
-
-   if (flags & EffectManager::kConfigured)
-   {
-      ProjectAudioManager::Get( project ).Stop();
-//    SelectAllIfNone();
-   }
-
-   EffectManager & em = EffectManager::Get();
-   bool success = em.DoAudacityCommand(ID, 
-      context,
-      &window,
-      (flags & EffectManager::kConfigured) == 0);
-
-   if (!success)
-      return false;
-
-/*
-   if (em.GetSkipStateFlag())
-      flags = flags | OnEffectFlags::kSkipState;
-
-   if (!(flags & OnEffectFlags::kSkipState))
-   {
-      wxString shortDesc = em.GetCommandName(ID);
-      wxString longDesc = em.GetCommandDescription(ID);
-      PushState(longDesc, shortDesc);
-   }
-*/
-   window.RedrawProject();
-   return true;
 }
 
 bool MacroCommands::ApplyEffectCommand(
@@ -573,7 +525,7 @@ bool MacroCommands::ApplyEffectCommand(
    {
       if( plug->GetPluginType() == PluginTypeAudacityCommand )
          // and apply the effect...
-         res = DoAudacityCommand(ID,
+         res = CommandDispatch::DoAudacityCommand(ID,
             Context,
             EffectManager::kConfigured |
             EffectManager::kSkipState |
@@ -590,44 +542,9 @@ bool MacroCommands::ApplyEffectCommand(
    return res;
 }
 
-bool MacroCommands::HandleTextualCommand( CommandManager &commandManager,
-   const CommandID & Str,
-   const CommandContext & context, CommandFlag flags, bool alwaysEnabled)
-{
-   switch ( commandManager.HandleTextualCommand(
-      Str, context, flags, alwaysEnabled) ) {
-   case CommandManager::CommandSuccess:
-      return true;
-   case CommandManager::CommandFailure:
-      return false;
-   case CommandManager::CommandNotFound:
-   default:
-      break;
-   }
-
-   // Not one of the singleton commands.
-   // We could/should try all the list-style commands.
-   // instead we only try the effects.
-   PluginManager & pm = PluginManager::Get();
-   EffectManager & em = EffectManager::Get();
-   const PluginDescriptor *plug = pm.GetFirstPlugin(PluginTypeEffect);
-   while (plug)
-   {
-      if (em.GetCommandIdentifier(plug->GetID()) == Str)
-      {
-         return EffectUI::DoEffect(
-            plug->GetID(), context,
-            EffectManager::kConfigured);
-      }
-      plug = pm.GetNextPlugin(PluginTypeEffect);
-   }
-
-   return false;
-}
-
 bool MacroCommands::ApplyCommand( const TranslatableString &friendlyCommand,
    const CommandID & command, const wxString & params,
-   CommandContext const * pContext)
+   CommandContext const *const pContext)
 {
    // Test for an effect.
    const PluginID & ID =
@@ -642,11 +559,10 @@ bool MacroCommands::ApplyCommand( const TranslatableString &friendlyCommand,
          ID, friendlyCommand, command, params, context);
    }
 
-   AudacityProject *project = &mProject;
-   auto &manager = CommandManager::Get( *project );
-   if( pContext ){
-      if( HandleTextualCommand(
-         manager, command, *pContext, AlwaysEnabledFlag, true ) )
+   if (pContext) {
+      assert(&pContext->project == &GetProject());
+      if( CommandDispatch::HandleTextualCommand(
+         command, *pContext, AlwaysEnabledFlag, true ) )
          return true;
       pContext->Status( wxString::Format(
          _("Your batch command of %s was not recognized."), friendlyCommand.Translation() ));
@@ -655,8 +571,8 @@ bool MacroCommands::ApplyCommand( const TranslatableString &friendlyCommand,
    else
    {
       const CommandContext context(  mProject );
-      if( HandleTextualCommand(
-         manager, command, context, AlwaysEnabledFlag, true ) )
+      if( CommandDispatch::HandleTextualCommand(
+         command, context, AlwaysEnabledFlag, true ) )
          return true;
    }
 
@@ -672,16 +588,15 @@ bool MacroCommands::ApplyCommandInBatchMode(
    const CommandID & command, const wxString &params,
    CommandContext const * pContext)
 {
+   assert(!pContext || &pContext->project == &GetProject());
    AudacityProject *project = &mProject;
    auto &settings = ProjectSettings::Get( *project );
    // Recalc flags and enable items that may have become enabled.
-   MenuManager::Get(*project).UpdateMenus(false);
+   CommandManager::Get(*project).UpdateMenus(false);
    // enter batch mode...
-   bool prevShowMode = settings.GetShowId3Dialog();
    project->mBatchMode++;
    auto cleanup = finally( [&] {
       // exit batch mode...
-      settings.SetShowId3Dialog(prevShowMode);
       project->mBatchMode--;
    } );
 
@@ -861,7 +776,7 @@ bool MacroCommands::ReportAndSkip(
    const TranslatableString & friendlyCommand, const wxString & params)
 {
    int bDebug;
-   gPrefs->Read(wxT("/Batch/Debug"), &bDebug, false);
+   gPrefs->Read(wxT("/Batch/Debug"), &bDebug, 0);
    if( bDebug == 0 )
       return false;
 

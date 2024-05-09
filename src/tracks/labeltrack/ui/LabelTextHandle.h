@@ -12,11 +12,10 @@ Paul Licameli split from TrackPanel.cpp
 #define __AUDACITY_LABEL_TEXT_HANDLE__
 
 #include "LabelDefaultClickHandle.h"
-#include "../../../SelectedRegion.h"
+#include "SelectedRegion.h"
 
 class wxMouseState;
 class LabelTrack;
-class NotifyingSelectedRegion;
 class SelectionStateChanger;
 class ZoomInfo;
 
@@ -35,10 +34,12 @@ public:
       ( const std::shared_ptr<LabelTrack> &pLT, int labelNum );
    virtual ~LabelTextHandle();
 
-   std::shared_ptr<LabelTrack> GetTrack() const { return mpLT.lock(); }
+   std::shared_ptr<const Track> FindTrack() const override;
    int GetLabelNum() const { return mLabelNum; }
 
    void Enter(bool forward, AudacityProject *) override;
+
+   bool HandlesRightClick() override;
 
    Result Click
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
@@ -58,9 +59,7 @@ public:
 
 private:
    void HandleTextClick
-      (AudacityProject &project,
-       const wxMouseEvent & evt, const wxRect & r, const ZoomInfo &zoomInfo,
-       NotifyingSelectedRegion &newSel);
+      (AudacityProject &project, const wxMouseEvent & evt);
    void HandleTextDragRelease(
       AudacityProject &project, const wxMouseEvent & evt);
 
@@ -68,8 +67,6 @@ private:
    int mLabelNum{ -1 };
    int mLabelTrackStartXPos { -1 };
    int mLabelTrackStartYPos { -1 };
-   SelectedRegion mSelectedRegion{};
-   std::shared_ptr<SelectionStateChanger> mChanger;
 
    /// flag to tell if it's a valid dragging
    bool mRightDragging{ false };

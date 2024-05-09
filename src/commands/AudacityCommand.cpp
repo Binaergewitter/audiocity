@@ -19,57 +19,34 @@ ShuttleGui.
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "AudacityCommand.h"
+#include "MemoryX.h"
 
 #include "CommandContext.h"
 
 #include <algorithm>
 
 #include <wx/defs.h>
-#include <wx/sizer.h>
 #include <wx/stockitem.h>
-#include <wx/string.h>
 #include <wx/tglbtn.h>
-#include <wx/timer.h>
-#include <wx/utils.h>
 #include <wx/log.h>
 
-#include "audacity/ConfigInterface.h"
+#include "ConfigInterface.h"
 
-#include "../Shuttle.h"
-#include "../ShuttleGui.h"
-#include "../widgets/ProgressDialog.h"
-#include "../widgets/HelpSystem.h"
-#include "../widgets/AudacityMessageBox.h"
+#include "ShuttleAutomation.h"
+#include "ShuttleGui.h"
+#include "ProgressDialog.h"
+#include "HelpSystem.h"
+#include "AudacityMessageBox.h"
 
 #include <unordered_map>
-
-namespace {
-
-AudacityCommand::VetoDialogHook &GetVetoDialogHook()
-{
-   static AudacityCommand::VetoDialogHook sHook = nullptr;
-   return sHook;
-}
-
-}
-
-auto AudacityCommand::SetVetoDialogHook( VetoDialogHook hook )
-   -> VetoDialogHook
-{
-   auto &theHook = GetVetoDialogHook();
-   auto result = theHook;
-   theHook = hook;
-   return result;
-}
 
 AudacityCommand::AudacityCommand()
 {
    mProgress = NULL;
    mUIParent = NULL;
    mUIDialog = NULL;
-   mUIDebug = false;
    mIsBatch = false;
    mNeedsInit = true;
 }
@@ -81,9 +58,9 @@ AudacityCommand::~AudacityCommand()
 }
 
 
-PluginPath AudacityCommand::GetPath(){        return BUILTIN_GENERIC_COMMAND_PREFIX + GetSymbol().Internal(); }
-VendorSymbol AudacityCommand::GetVendor(){      return XO("Audacity");}
-wxString AudacityCommand::GetVersion(){     return AUDACITY_VERSION_STRING;}
+PluginPath AudacityCommand::GetPath() const {        return BUILTIN_GENERIC_COMMAND_PREFIX + GetSymbol().Internal(); }
+VendorSymbol AudacityCommand::GetVendor() const {      return XO("Audacity");}
+wxString AudacityCommand::GetVersion()  const {     return AUDACITY_VERSION_STRING;}
 
 
 bool AudacityCommand::Init(){
@@ -91,7 +68,7 @@ bool AudacityCommand::Init(){
       return true;
    mNeedsInit = false;
    ShuttleDefaults DefaultSettingShuttle;
-   return DefineParams( DefaultSettingShuttle );
+   return VisitSettings( DefaultSettingShuttle );
 }
 
 bool AudacityCommand::ShowInterface(wxWindow *parent, bool WXUNUSED(forceModal))
@@ -114,11 +91,6 @@ bool AudacityCommand::ShowInterface(wxWindow *parent, bool WXUNUSED(forceModal))
    mUIDialog->Fit();
    mUIDialog->SetMinSize(mUIDialog->GetSize());
 
-   // The Screenshot command might be popping this dialog up, just to capture it.
-   auto hook = GetVetoDialogHook();
-   if( hook && hook( mUIDialog ) )
-      return false;
-
    bool res = mUIDialog->ShowModal() != 0;
    return res;
 }
@@ -136,7 +108,7 @@ wxDialog *AudacityCommand::CreateUI(wxWindow *parent, AudacityCommand * WXUNUSED
    return NULL;
 }
 
-bool AudacityCommand::GetAutomationParameters(wxString & parms)
+bool AudacityCommand::SaveSettingsAsString(wxString & parms)
 {
    CommandParameters eap;
 
@@ -147,14 +119,14 @@ bool AudacityCommand::GetAutomationParameters(wxString & parms)
 
    ShuttleGetAutomation S;
    S.mpEap = &eap;
-   bool bResult = DefineParams( S );
+   bool bResult = VisitSettings( S );
    wxASSERT_MSG( bResult, "You did not define DefineParameters() for this command" );
    static_cast<void>(bResult); // fix unused variable warning in release mode
 
    return eap.GetParameters(parms);
 }
 
-bool AudacityCommand::SetAutomationParameters(const wxString & parms)
+bool AudacityCommand::LoadSettingsFromString(const wxString & parms)
 {
    wxString preset = parms;
 
@@ -162,7 +134,7 @@ bool AudacityCommand::SetAutomationParameters(const wxString & parms)
    ShuttleSetAutomation S;
 
    S.SetForWriting( &eap );
-   bool bResult = DefineParams( S );
+   bool bResult = VisitSettings( S );
    wxASSERT_MSG( bResult, "You did not define DefineParameters() for this command" );
    static_cast<void>(bResult); // fix unused variable warning in release mode
    if (!S.bOK)
@@ -236,6 +208,16 @@ bool AudacityCommand::TransferDataFromWindow()
    if (mUIParent && (!mUIParent->Validate() || !mUIParent->TransferDataFromWindow()))
       return false;
    return true;
+}
+
+bool AudacityCommand::VisitSettings( SettingsVisitor & )
+{
+   return false;
+}
+
+bool AudacityCommand::VisitSettings( ConstSettingsVisitor & )
+{
+   return false;
 }
 
 int AudacityCommand::MessageBox(

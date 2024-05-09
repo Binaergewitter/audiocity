@@ -8,13 +8,13 @@ Paul Licameli
 
 **********************************************************************/
 
-#include "../../Audacity.h"
+
 #include "SliderHandle.h"
 
 #include "../../widgets/ASlider.h"
 #include "../../HitTestResult.h"
 #include "../../RefreshCode.h"
-#include "../../Track.h"
+#include "Track.h"
 #include "../../TrackPanelMouseEvent.h"
 
 SliderHandle::SliderHandle
@@ -32,6 +32,16 @@ void SliderHandle::Enter(bool, AudacityProject *)
 
 SliderHandle::~SliderHandle()
 {
+}
+
+std::shared_ptr<const Track> SliderHandle::FindTrack() const
+{
+   return mpTrack.lock();
+}
+
+bool SliderHandle::IsDragging() const
+{
+   return mIsDragging;
 }
 
 UIHandle::Result SliderHandle::Click
@@ -56,7 +66,7 @@ UIHandle::Result SliderHandle::Click
       // Do not start a drag
       return result | RefreshCell | Cancelled;
    else {
-      mIsClicked = true;
+      mIsDragging = true;
       return result | RefreshCell;
    }
 }

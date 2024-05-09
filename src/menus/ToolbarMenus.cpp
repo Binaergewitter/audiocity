@@ -1,69 +1,31 @@
-#include "../Audacity.h"
-
-#include "../Menus.h"
-#include "../ProjectSettings.h"
-#include "../commands/CommandContext.h"
-#include "../commands/CommandManager.h"
+#include "CommandContext.h"
 #include "../toolbars/ToolManager.h"
 
 /// Namespace for functions for View Toolbar menu
-namespace ToolbarActions {
-
-// exported helper functions
-// none
-
-// Menu handler functions
-
-struct Handler : CommandHandlerObject {
-
-void OnResetToolBars(const CommandContext &context)
-{
-   ToolManager::OnResetToolBars(context);
-}
-
-}; // struct Handler
-
-
-} // namespace
-
-static CommandHandlerObject &findCommandHandler(AudacityProject &) {
-   // Handler is not stateful.  Doesn't need a factory registered with
-   // AudacityProject.
-   static ToolbarActions::Handler instance;
-   return instance;
-};
+namespace {
 
 // Menu definitions
 
-#define FN(X) (& ToolbarActions::Handler :: X)
+using namespace MenuRegistry;
 
-namespace{
-using namespace MenuTable;
-
-BaseItemSharedPtr ToolbarsMenu()
+auto ToolbarsMenu()
 {
-   using Options = CommandManager::Options;
-
-   static BaseItemSharedPtr menu{
-   ( FinderScope{ findCommandHandler },
+   static auto menu = std::shared_ptr{
    Section( wxT("Toolbars"),
       Menu( wxT("Toolbars"), XXO("&Toolbars"),
          Section( "Reset",
             /* i18n-hint: (verb)*/
             Command( wxT("ResetToolbars"), XXO("Reset Toolb&ars"),
-               FN(OnResetToolBars), AlwaysEnabledFlag )
+                    ToolManager::OnResetToolBars, AlwaysEnabledFlag )
          ),
 
          Section( "Other" )
       )
-   ) ) };
+   ) };
    return menu;
 }
 
-AttachedItem sAttachment1{
-   Placement{ wxT("View/Other"), { OrderingHint::Begin } },
-   Shared( ToolbarsMenu() )
+AttachedItem sAttachment1{ Indirect(ToolbarsMenu()),
+   Placement{ wxT("View/Other"), { OrderingHint::Begin } }
 };
 }
-
-#undef FN

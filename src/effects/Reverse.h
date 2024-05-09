@@ -13,9 +13,10 @@
 #ifndef __AUDACITY_EFFECT_REVERSE__
 #define __AUDACITY_EFFECT_REVERSE__
 
-#include "Effect.h"
+#include "StatefulEffect.h"
+#include <functional>
 
-class EffectReverse final : public Effect
+class EffectReverse final : public StatefulEffect
 {
 public:
    static const ComponentInterfaceSymbol Symbol;
@@ -25,24 +26,17 @@ public:
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
-   bool IsInteractive() override;
+   EffectType GetType() const override;
+   bool IsInteractive() const override;
 
    // Effect implementation
 
-   bool Process() override;
-
-private:
-   // EffectReverse implementation
-
-   bool ProcessOneClip(int count, WaveTrack* track,
-                   sampleCount start, sampleCount len, sampleCount originalStart, sampleCount originalEnd);
-   bool ProcessOneWave(int count, WaveTrack* track, sampleCount start, sampleCount len);
+   bool Process(EffectInstance &instance, EffectSettings &settings) override;
  };
 
 #endif

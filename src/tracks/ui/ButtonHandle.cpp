@@ -8,13 +8,15 @@ Paul Licameli
 
 **********************************************************************/
 
-#include "../../Audacity.h"
+
 #include "ButtonHandle.h"
 
 #include "../../HitTestResult.h"
 #include "../../RefreshCode.h"
-#include "../../Track.h"
+#include "Track.h"
 #include "../../TrackPanelMouseEvent.h"
+
+#include <wx/event.h>
 
 ButtonHandle::ButtonHandle
 ( const std::shared_ptr<Track> &pTrack, const wxRect &rect )
@@ -25,6 +27,16 @@ ButtonHandle::ButtonHandle
 
 ButtonHandle::~ButtonHandle()
 {
+}
+
+std::shared_ptr<const Track> ButtonHandle::FindTrack() const
+{
+   return mpTrack.lock();
+}
+
+bool ButtonHandle::IsDragging() const
+{
+   return mIsDragging;
 }
 
 void ButtonHandle::Enter(bool, AudacityProject *)
@@ -47,7 +59,7 @@ UIHandle::Result ButtonHandle::Click
    // Come here for left click or double click
    if (mRect.Contains(event.m_x, event.m_y)) {
       mWasIn = true;
-      mIsClicked = true;
+      mIsDragging = true;
       // Toggle visible button state
       return RefreshCell;
    }

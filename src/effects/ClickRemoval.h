@@ -16,16 +16,21 @@
 #ifndef __AUDACITY_EFFECT_CLICK_REMOVAL__
 #define __AUDACITY_EFFECT_CLICK_REMOVAL__
 
-#include "Effect.h"
+#include "StatefulEffect.h"
+#include "ShuttleAutomation.h"
+#include <wx/weakref.h>
 
 class wxSlider;
 class wxTextCtrl;
 class Envelope;
 class ShuttleGui;
+class WaveChannel;
 
-class EffectClickRemoval final : public Effect
+class EffectClickRemoval final : public StatefulEffect
 {
 public:
+   static inline EffectClickRemoval *
+   FetchParameters(EffectClickRemoval &e, EffectSettings &) { return &e; }
    static const ComponentInterfaceSymbol Symbol;
 
    EffectClickRemoval();
@@ -33,32 +38,27 @@ public:
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
-   wxString ManualPage() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+   ManualPageID ManualPage() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
-
-   // EffectClientInterface implementation
-
-   bool DefineParams( ShuttleParams & S ) override;
-   bool GetAutomationParameters(CommandParameters & parms) override;
-   bool SetAutomationParameters(CommandParameters & parms) override;
+   EffectType GetType() const override;
 
    // Effect implementation
 
-   bool CheckWhetherSkipEffect() override;
-   bool Startup() override;
-   bool Process() override;
-   void PopulateOrExchange(ShuttleGui & S) override;
-   bool TransferDataToWindow() override;
-   bool TransferDataFromWindow() override;
+   bool CheckWhetherSkipEffect(const EffectSettings &settings) const override;
+   bool Process(EffectInstance &instance, EffectSettings &settings) override;
+   std::unique_ptr<EffectEditor> PopulateOrExchange(
+      ShuttleGui & S, EffectInstance &instance,
+      EffectSettingsAccess &access, const EffectOutputs *pOutputs) override;
+   bool TransferDataToWindow(const EffectSettings &settings) override;
+   bool TransferDataFromWindow(EffectSettings &settings) override;
 
 private:
-   bool ProcessOne(int count, WaveTrack * track,
-                   sampleCount start, sampleCount len);
+   bool ProcessOne(int count, WaveChannel &track,
+      sampleCount start, sampleCount len);
 
    bool RemoveClicks(size_t len, float *buffer);
 
@@ -68,6 +68,8 @@ private:
    void OnThreshSlider(wxCommandEvent & evt);
 
 private:
+   wxWeakRef<wxWindow> mUIParent{};
+
    Envelope *mEnvelope;
 
    bool mbDidSomething; // This effect usually does nothing on real-world data.
@@ -81,7 +83,13 @@ private:
    wxTextCtrl *mWidthT;
    wxTextCtrl *mThreshT;
 
+   const EffectParameterMethods& Parameters() const override;
    DECLARE_EVENT_TABLE()
+
+static constexpr EffectParameter Threshold{ &EffectClickRemoval::mThresholdLevel,
+   L"Threshold",  200,     0,       900,     1  };
+static constexpr EffectParameter Width{ &EffectClickRemoval::mClickWidth,
+   L"Width",      20,      0,       40,      1  };
 };
 
 #endif

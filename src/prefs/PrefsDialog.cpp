@@ -13,38 +13,34 @@
 \brief Dialog that shows the current PrefsPanel in a tabbed divider.
 
 *//*******************************************************************/
-
-#include "../Audacity.h" // for USE_* macros
 #include "PrefsDialog.h"
+
+#include <thread>
 
 #include <wx/app.h>
 #include <wx/setup.h> // for wxUSE_* macros
 #include <wx/defs.h>
-#include <wx/button.h>
-#include <wx/dialog.h>
-#include <wx/event.h>
 #include <wx/font.h>
 #include <wx/gdicmn.h>
-#include <wx/intl.h>
 #include <wx/listbox.h>
-#include <wx/sizer.h>
 
 #include <wx/listbook.h>
 
 #include <wx/treebook.h>
 #include <wx/treectrl.h>
 
-#include "../AudioIOBase.h"
-#include "../Prefs.h"
-#include "../ShuttleGui.h"
-#include "../commands/CommandManager.h"
+#include "AudioIOBase.h"
+#include "Prefs.h"
+#include "ProjectWindows.h"
+#include "ShuttleGui.h"
+#include "CommandManager.h"
 
 #include "PrefsPanel.h"
 
-#include "../widgets/HelpSystem.h"
+#include "HelpSystem.h"
 
 #if wxUSE_ACCESSIBILITY
-#include "../widgets/WindowAccessible.h"
+#include "WindowAccessible.h"
 #endif
 
 
@@ -487,12 +483,17 @@ PrefsDialog::PrefsDialog(
                   const auto &node = *it;
                   const auto &factory = node.factory;
                   wxWindow *const w = factory(mCategories, wxID_ANY, pProject);
-                  if (stack.empty())
+                  node.enabled = (w != nullptr);
+                  if (stack.empty()) {
                      // Parameters are: AddPage(page, name, IsSelected, imageId).
-                     mCategories->AddPage(w, w->GetName(), false, 0);
+                     if (w)
+                        mCategories->AddPage(w, w->GetName(), false, 0);
+                  }
                   else {
                      IntPair &top = *stack.rbegin();
-                     mCategories->InsertSubPage(top.first, w, w->GetName(), false, 0);
+                     if (w)
+                        mCategories->InsertSubPage(top.first,
+                           w, w->GetName(), false, 0);
                      if (--top.second == 0) {
                         // Expand all nodes before the layout calculation
                         mCategories->ExpandNode(top.first, true);
@@ -515,18 +516,21 @@ PrefsDialog::PrefsDialog(
          const auto &node = factories[0];
          const auto &factory = node.factory;
          mUniquePage = factory(S.GetParent(), wxID_ANY, pProject);
-         wxWindow * uniquePageWindow = S.Prop(1)
-            .Position(wxEXPAND)
-            .AddWindow(mUniquePage);
-         // We're not in the wxTreebook, so add the accelerator here
-         wxAcceleratorEntry entries[1];
+         node.enabled = (mUniquePage != nullptr);
+         if (mUniquePage) {
+            wxWindow * uniquePageWindow = S.Prop(1)
+               .Position(wxEXPAND)
+               .AddWindow(mUniquePage);
+            // We're not in the wxTreebook, so add the accelerator here
+            wxAcceleratorEntry entries[1];
 #if defined(__WXMAC__)
-         // Is there a standard shortcut on Mac?
+            // Is there a standard shortcut on Mac?
 #else
-         entries[0].Set(wxACCEL_NORMAL, (int) WXK_F1, wxID_HELP);
+            entries[0].Set(wxACCEL_NORMAL, (int) WXK_F1, wxID_HELP);
 #endif
-         wxAcceleratorTable accel(1, entries);
-         uniquePageWindow->SetAcceleratorTable(accel);
+            wxAcceleratorTable accel(1, entries);
+            uniquePageWindow->SetAcceleratorTable(accel);
+         }
       }
    }
    S.EndVerticalLay();
@@ -554,8 +558,10 @@ PrefsDialog::PrefsDialog(
    {
       int iPage = 0;
       for (auto it = factories.begin(), end = factories.end();
-         it != end; ++it, ++iPage)
-         mCategories->ExpandNode(iPage, it->expanded);
+         it != end; ++it) {
+         if (it->enabled)
+            mCategories->ExpandNode(iPage++, it->expanded);
+      }
    }
 
    // This ASSERT was originally used to limit us to 800 x 600.
@@ -586,6 +592,8 @@ PrefsDialog::PrefsDialog(
    // Center after all that resizing, but make sure it doesn't end up
    // off-screen
    CentreOnParent();
+
+   mTransaction = std::make_unique< SettingTransaction >();
 }
 
 PrefsDialog::~PrefsDialog()
@@ -605,7 +613,7 @@ int PrefsDialog::ShowModal()
          selected = 0;  // clamp to available range of tabs
       mCategories->SetSelection(selected);
    }
-   else {
+   else if (mUniquePage) {
       auto Temp = mTitlePrefix;
       Temp.Join( Verbatim( mUniquePage->GetLabel() ), wxT(" ") );
       SetTitle(Temp);
@@ -624,7 +632,7 @@ void PrefsDialog::OnCancel(wxCommandEvent & WXUNUSED(event))
          ((PrefsPanel *)mCategories->GetPage(i))->Cancel();
       }
    }
-   else
+   else if (mUniquePage)
       mUniquePage->Cancel();
 
    // Remember modified dialog size, even if cancelling.
@@ -643,21 +651,21 @@ PrefsPanel * PrefsDialog::GetCurrentPanel()
    if( mCategories) 
       return static_cast<PrefsPanel*>(mCategories->GetCurrentPage());
    else
-   {
-      wxASSERT( mUniquePage );
       return mUniquePage;
-   }
 }
 
 void PrefsDialog::OnPreview(wxCommandEvent & WXUNUSED(event))
 {
-   GetCurrentPanel()->Preview();
+   if (const auto pPanel = GetCurrentPanel())
+      pPanel->Preview();
 }
 
 void PrefsDialog::OnHelp(wxCommandEvent & WXUNUSED(event))
 {
-   wxString page = GetCurrentPanel()->HelpPageName();
-   HelpSystem::ShowHelp(this, page, true);
+   if (const auto pPanel = GetCurrentPanel()) {
+      const auto &page = pPanel->HelpPageName();
+      HelpSystem::ShowHelp(this, page, true);
+   }
 }
 
 void PrefsDialog::ShuttleAll( ShuttleGui & S)
@@ -673,7 +681,8 @@ void PrefsDialog::ShuttleAll( ShuttleGui & S)
    else
    {
       S.ResetId();
-      mUniquePage->PopulateOrExchange( S );
+      if (mUniquePage)
+         mUniquePage->PopulateOrExchange( S );
    }
 }
 
@@ -701,7 +710,7 @@ void PrefsDialog::OnOK(wxCommandEvent & WXUNUSED(event))
          }
       }
    }
-   else {
+   else if (mUniquePage) {
       if (!mUniquePage->Validate())
          return;
    }
@@ -719,7 +728,7 @@ void PrefsDialog::OnOK(wxCommandEvent & WXUNUSED(event))
          panel->Commit();
       }
    }
-   else {
+   else if (mUniquePage) {
       mUniquePage->Preview();
       mUniquePage->Commit();
    }
@@ -752,8 +761,10 @@ void PrefsDialog::OnOK(wxCommandEvent & WXUNUSED(event))
       if (gAudioIO->IsMonitoring())
       {
          gAudioIO->StopStream();
-         while (gAudioIO->IsBusy())
-            wxMilliSleep(100);
+         while (gAudioIO->IsBusy()) {
+            using namespace std::chrono;
+            std::this_thread::sleep_for(100ms);
+         }
       }
       gAudioIO->HandleDeviceChange();
    }
@@ -766,7 +777,9 @@ void PrefsDialog::OnOK(wxCommandEvent & WXUNUSED(event))
    //      so AudacityProject::UpdatePrefs() or any of the routines it calls must
    //      not cause MenuCreator::RebuildMenuBar() to be executed.
 
-   wxTheApp->AddPendingEvent(wxCommandEvent{ EVT_PREFS_UPDATE });
+   PrefsListener::Broadcast();
+
+   mTransaction->Commit();
 
    if( IsModal() )
       EndModal(true);
@@ -782,6 +795,11 @@ void PrefsDialog::SelectPageByName(const wxString &pageName)
       for (size_t i = 0; i < n; i++) {
          if (mCategories->GetPageText(i) == pageName) {
             mCategories->SetSelection(i);
+            // This covers the case, when ShowModal is called 
+            // after selecting the page.
+            // ShowModal will select the page previously used by 
+            // user
+            SavePreferredPage();
             return;
          }
       }
@@ -826,16 +844,18 @@ void PrefsDialog::RecordExpansionState()
    {
       int iPage = 0;
       for (auto it = mFactories.begin(), end = mFactories.end();
-         it != end; ++it, ++iPage)
-         it->expanded = mCategories->IsNodeExpanded(iPage);
+         it != end; ++it) {
+         if (it->enabled)
+            it->expanded = mCategories->IsNodeExpanded(iPage++);
+      }
    }
    else
       mFactories[0].expanded = true;
 }
 
 #include <wx/frame.h>
-#include "../Menus.h"
-#include "../Project.h"
+#include "../MenuCreator.h"
+#include "Project.h"
 
 void DoReloadPreferences( AudacityProject &project )
 {
@@ -853,7 +873,7 @@ void DoReloadPreferences( AudacityProject &project )
    //      rebuilding the menus while the PrefsDialog is still in the modal
    //      state.
    for (auto p : AllProjects{}) {
-      MenuManager::Get(*p).RebuildMenuBar(*p);
+      MenuCreator::Get(*p).RebuildMenuBar();
 // TODO: The comment below suggests this workaround is obsolete.
 #if defined(__WXGTK__)
       // Workaround for:

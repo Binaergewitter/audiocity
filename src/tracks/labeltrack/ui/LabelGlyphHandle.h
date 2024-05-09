@@ -12,6 +12,7 @@ Paul Licameli split from TrackPanel.cpp
 #define __AUDACITY_LABEL_GLYPH_HANDLE__
 
 #include "LabelDefaultClickHandle.h"
+#include "Observer.h"
 
 class wxMouseState;
 class LabelTrack;
@@ -35,20 +36,20 @@ struct LabelTrackHit
    ~LabelTrackHit();
 
    int mEdge{};
+   //This one is to distinguish ranged label from point label
+   int mMouseOverLabel{ -1 };        /// Keeps track of which (ranged) label the mouse is currently over.
    int mMouseOverLabelLeft{ -1 };    /// Keeps track of which left label the mouse is currently over.
    int mMouseOverLabelRight{ -1 };   /// Keeps track of which right label the mouse is currently over.
-   bool mbIsMoving {};
    bool mIsAdjustingLabel {};
 
    std::shared_ptr<LabelTrack> mpLT {};
 
-   void OnLabelPermuted( LabelTrackEvent &e );
+   Observer::Subscription mSubscription;
+   void OnLabelPermuted( const LabelTrackEvent &e );
 };
 
 class LabelGlyphHandle final : public LabelDefaultClickHandle
 {
-   static HitTestPreview HitPreview(bool hitCenter);
-
 public:
    explicit LabelGlyphHandle
       (const std::shared_ptr<LabelTrack> &pLT,
@@ -62,6 +63,8 @@ public:
        const std::shared_ptr<LabelTrack> &pLT, const wxRect &rect);
 
    virtual ~LabelGlyphHandle();
+
+   std::shared_ptr<const Track> FindTrack() const override;
 
    void Enter(bool forward, AudacityProject *) override;
 

@@ -12,14 +12,14 @@
 
 #include "Scrubbing.h"
 #include "../../widgets/Overlay.h"
-#include "../../ClientData.h"
+#include "ClientData.h"
 #include "../../AdornedRulerPanel.h"
-#include "../../Project.h"
+#include "Project.h"
 #include "../../ProjectWindow.h"
+#include "../../ProjectWindows.h"
 #include "../../TrackPanel.h"
 
 #include <wx/dcclient.h>
-#include <wx/event.h>
 #include <wx/windowptr.h>
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -27,8 +27,7 @@
 
 // Specialist in drawing the scrub speed, and listening for certain events
 class ScrubbingOverlay final
-   : public wxEvtHandler
-   , public Overlay
+   : public Overlay
    , public ClientData::Base
 {
 public:
@@ -40,12 +39,13 @@ private:
    std::pair<wxRect, bool> DoGetRectangle(wxSize size) override;
    void Draw(OverlayPanel &panel, wxDC &dc) override;
 
-   void OnTimer(wxCommandEvent &event);
+   void OnTimer(Observer::Message);
 
    const Scrubber &GetScrubber() const;
    Scrubber &GetScrubber();
 
    AudacityProject *mProject;
+   Observer::Subscription mSubscription;
 
    wxRect mLastScrubRect, mNextScrubRect;
    wxString mLastScrubSpeedText, mNextScrubSpeedText;
@@ -58,9 +58,8 @@ ScrubbingOverlay::ScrubbingOverlay(AudacityProject *project)
    , mLastScrubSpeedText()
    , mNextScrubSpeedText()
 {
-   mProject->Bind(EVT_TRACK_PANEL_TIMER,
-      &ScrubbingOverlay::OnTimer,
-      this);
+   mSubscription = ProjectWindow::Get( *mProject ).GetPlaybackScroller()
+      .Subscribe(*this, &ScrubbingOverlay::OnTimer);
 }
 
 unsigned ScrubbingOverlay::SequenceNumber() const
@@ -107,11 +106,8 @@ void ScrubbingOverlay::Draw(OverlayPanel &, wxDC &dc)
    dc.DrawText(mLastScrubSpeedText, mLastScrubRect.GetX(), mLastScrubRect.GetY());
 }
 
-void ScrubbingOverlay::OnTimer(wxCommandEvent &event)
+void ScrubbingOverlay::OnTimer(Observer::Message)
 {
-   // Let other listeners get the notification
-   event.Skip();
-
    Scrubber &scrubber = GetScrubber();
    const auto isScrubbing = scrubber.IsScrubbing();
    auto &ruler = AdornedRulerPanel::Get( *mProject );
@@ -123,7 +119,7 @@ void ScrubbingOverlay::OnTimer(wxCommandEvent &event)
    {
       if(scrubber.HasMark()) {
          auto xx = ruler.ScreenToClient(position).x;
-         ruler.UpdateQuickPlayPos( xx, false );
+         ruler.UpdateQuickPlayPos( xx );
 
          if (!isScrubbing)
             // Really start scrub if motion is far enough

@@ -16,10 +16,9 @@
 #ifndef __AUDACITY_EFFECT_WAHWAH__
 #define __AUDACITY_EFFECT_WAHWAH__
 
-#include "Effect.h"
+#include "StatelessPerTrackEffect.h"
+#include "ShuttleAutomation.h"
 
-class wxSlider;
-class wxTextCtrl;
 class ShuttleGui;
 
 class EffectWahwahState
@@ -36,9 +35,44 @@ public:
    double b0, b1, b2, a0, a1, a2;
 };
 
-class EffectWahwah final : public Effect
+
+struct EffectWahwahSettings
+{
+    /* Parameters:
+    mFreq - LFO frequency
+    mPhase - LFO startphase in RADIANS - useful for stereo WahWah
+    mDepth - Wah depth
+    mRes - Resonance
+    mFreqOfs - Wah frequency offset
+    mOutGain - output gain
+
+    !!!!!!!!!!!!! IMPORTANT!!!!!!!!! :
+    mDepth and mFreqOfs should be from 0(min) to 1(max) !
+    mRes should be greater than 0 !  */
+
+   static constexpr double freqDefault = 1.5;
+   static constexpr double phaseDefault = 0.0;
+   static constexpr int    depthDefault = 70;
+   static constexpr double resDefault = 2.5;
+   static constexpr int    freqOfsDefault = 30;
+   static constexpr double outGainDefault = -6.0;
+
+
+   double mFreq   { freqDefault };
+   double mPhase  { phaseDefault };
+   int    mDepth  { depthDefault };
+   double mRes    { resDefault };
+   int    mFreqOfs{ freqOfsDefault };
+   double mOutGain{ outGainDefault };
+};
+
+
+class EffectWahwah final : public EffectWithSettings<
+   EffectWahwahSettings, StatelessPerTrackEffect
+>
 {
 public:
+      
    static const ComponentInterfaceSymbol Symbol;
 
    EffectWahwah();
@@ -46,97 +80,37 @@ public:
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
-   wxString ManualPage() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+   ManualPageID ManualPage() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
-   bool SupportsRealtime() override;
-
-   // EffectClientInterface implementation
-
-   unsigned GetAudioInCount() override;
-   unsigned GetAudioOutCount() override;
-   bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
-   size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
-   bool RealtimeInitialize() override;
-   bool RealtimeAddProcessor(unsigned numChannels, float sampleRate) override;
-   bool RealtimeFinalize() override;
-   size_t RealtimeProcess(int group,
-                                       float **inbuf,
-                                       float **outbuf,
-                                       size_t numSamples) override;
-   bool DefineParams( ShuttleParams & S ) override;
-   bool GetAutomationParameters(CommandParameters & parms) override;
-   bool SetAutomationParameters(CommandParameters & parms) override;
+   EffectType GetType() const override;
+   RealtimeSince RealtimeSupport() const override;
 
    // Effect implementation
 
-   void PopulateOrExchange(ShuttleGui & S) override;
-   bool TransferDataToWindow() override;
-   bool TransferDataFromWindow() override;
+   std::unique_ptr<EffectEditor> MakeEditor(
+      ShuttleGui & S, EffectInstance &instance,
+      EffectSettingsAccess &access, const EffectOutputs *pOutputs)
+   const override;
+
+   struct Editor;
+   struct Instance;
+   std::shared_ptr<EffectInstance> MakeInstance() const override;
 
 private:
    // EffectWahwah implementation
 
-   void InstanceInit(EffectWahwahState & data, float sampleRate);
-   size_t InstanceProcess(EffectWahwahState & data, float **inBlock, float **outBlock, size_t blockLen);
+   const EffectParameterMethods& Parameters() const override;
 
-   void OnFreqSlider(wxCommandEvent & evt);
-   void OnPhaseSlider(wxCommandEvent & evt);
-   void OnDepthSlider(wxCommandEvent & evt);
-   void OnResonanceSlider(wxCommandEvent & evt);
-   void OnFreqOffSlider(wxCommandEvent & evt);
-   void OnGainSlider(wxCommandEvent & evt);
-
-   void OnFreqText(wxCommandEvent & evt);
-   void OnPhaseText(wxCommandEvent & evt);
-   void OnDepthText(wxCommandEvent & evt);
-   void OnResonanceText(wxCommandEvent & evt);
-   void OnFreqOffText(wxCommandEvent & evt);
-   void OnGainText(wxCommandEvent & evt);
-
-private:
-   EffectWahwahState mMaster;
-   std::vector<EffectWahwahState> mSlaves;
-
-   /* Parameters:
-   mFreq - LFO frequency
-   mPhase - LFO startphase in RADIANS - useful for stereo WahWah
-   mDepth - Wah depth
-   mRes - Resonance
-   mFreqOfs - Wah frequency offset
-   mOutGain - output gain
-
-   !!!!!!!!!!!!! IMPORTANT!!!!!!!!! :
-   mDepth and mFreqOfs should be from 0(min) to 1(max) !
-   mRes should be greater than 0 !  */
-
-   double mFreq;
-   double mPhase;
-   int mDepth;
-   double mRes;
-   int mFreqOfs;
-   double mOutGain;
-
-   wxTextCtrl *mFreqT;
-   wxTextCtrl *mPhaseT;
-   wxTextCtrl *mDepthT;
-   wxTextCtrl *mResT;
-   wxTextCtrl *mFreqOfsT;
-   wxTextCtrl *mOutGainT;
-
-   wxSlider *mFreqS;
-   wxSlider *mPhaseS;
-   wxSlider *mDepthS;
-   wxSlider *mResS;
-   wxSlider *mFreqOfsS;
-   wxSlider *mOutGainS;
-
-   DECLARE_EVENT_TABLE()
+static constexpr EffectParameter Freq   { &EffectWahwahSettings::mFreq,    L"Freq",       EffectWahwahSettings::freqDefault,      0.1,       4.0,  10  };
+static constexpr EffectParameter Phase  { &EffectWahwahSettings::mPhase,   L"Phase",      EffectWahwahSettings::phaseDefault,     0.0,     360.0,   1  };
+static constexpr EffectParameter Depth  { &EffectWahwahSettings::mDepth,   L"Depth",      EffectWahwahSettings::depthDefault,     0,       100,     1  }; // scaled to 0-1 before processing
+static constexpr EffectParameter Res    { &EffectWahwahSettings::mRes,     L"Resonance",  EffectWahwahSettings::resDefault,       0.1,      10.0,  10  };
+static constexpr EffectParameter FreqOfs{ &EffectWahwahSettings::mFreqOfs, L"Offset",     EffectWahwahSettings::freqOfsDefault,   0,       100,     1  }; // scaled to 0-1 before processing
+static constexpr EffectParameter OutGain{ &EffectWahwahSettings::mOutGain, L"Gain",       EffectWahwahSettings::outGainDefault, -30.0,      30.0,   1  };
 };
 
 #endif
-

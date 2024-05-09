@@ -21,27 +21,22 @@ class ShuttleGui;
 
 #define TRACKS_BEHAVIORS_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Tracks Behaviors") }
 
-class TracksBehaviorsPrefs final : public PrefsPanel
+class AUDACITY_DLL_API TracksBehaviorsPrefs final : public PrefsPanel
 {
  public:
    TracksBehaviorsPrefs(wxWindow * parent, wxWindowID winid);
    ~TracksBehaviorsPrefs();
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
 
    bool Commit() override;
-   wxString HelpPageName() override;
-
-   static const wxChar *ScrollingPreferenceKey();
-   static inline bool ScrollingPreferenceDefault() { return false; }
+   ManualPageID HelpPageName() override;
 
  private:
    void Populate();
    void PopulateOrExchange(ShuttleGui & S) override;
 };
 
-extern ChoiceSetting TracksBehaviorsSolo;
-
-bool GetEditClipsCanMove();
+extern AUDACITY_DLL_API ChoiceSetting TracksBehaviorsAudioTrackPastePolicy;
 
 #endif

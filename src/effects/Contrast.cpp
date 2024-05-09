@@ -9,23 +9,24 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "Contrast.h"
 
 #include "../CommonCommandFlags.h"
-#include "../WaveTrack.h"
-#include "../Prefs.h"
-#include "../Project.h"
-#include "../ProjectFileIO.h"
-#include "../ProjectSettings.h"
-#include "../ProjectWindow.h"
-#include "../ShuttleGui.h"
-#include "../FileNames.h"
-#include "../ViewInfo.h"
-#include "../widgets/HelpSystem.h"
+#include "WaveTrack.h"
+#include "Prefs.h"
+#include "Project.h"
+#include "ProjectFileIO.h"
+#include "ProjectRate.h"
+#include "../ProjectWindowBase.h"
+#include "SelectFile.h"
+#include "ShuttleGui.h"
+#include "FileNames.h"
+#include "ViewInfo.h"
+#include "WaveChannelUtilities.h"
+#include "HelpSystem.h"
 #include "../widgets/NumericTextCtrl.h"
-#include "../widgets/AudacityMessageBox.h"
-#include "../widgets/ErrorDialog.h"
+#include "AudacityMessageBox.h"
 
 #include <cmath>
 #include <limits>
@@ -40,8 +41,11 @@
 #include <wx/log.h>
 #include <wx/wfstream.h>
 #include <wx/txtstrm.h>
+#include <wx/textctrl.h>
 
-#include "../PlatformCompatibility.h"
+#include "PlatformCompatibility.h"
+
+#include "NumericConverterFormats.h"
 
 #define DB_MAX_LIMIT 0.0   // Audio is massively distorted.
 #define WCAG2_PASS 20.0    // dB difference required to pass WCAG2 test.
@@ -56,7 +60,7 @@ bool ContrastDialog::GetDB(float &dB)
 
    auto p = FindProjectFromWindow( this );
    auto range =
-      TrackList::Get( *p ).SelectedLeaders< const WaveTrack >();
+      TrackList::Get(*p).Selected<const WaveTrack>();
    auto numberSelectedTracks = range.size();
    if (numberSelectedTracks > 1) {
       AudacityMessageDialog m(
@@ -77,15 +81,13 @@ bool ContrastDialog::GetDB(float &dB)
       return false;
    }
 
-   const auto channels = TrackList::Channels( *range.begin() );
-   for ( auto t : channels ) {
-      wxASSERT(mT0 <= mT1);
-
-      // Ignore whitespace beyond ends of track.
-      if(mT0 < t->GetStartTime())
-         mT0 = t->GetStartTime();
-      if(mT1 > t->GetEndTime())
-         mT1 = t->GetEndTime();
+   const auto first = *range.begin();
+   const auto channels = first->Channels();
+   assert(mT0 <= mT1);
+   // Ignore whitespace beyond ends of track.
+   mT0 = std::max(mT0, first->GetStartTime());
+   mT1 = std::min(mT1, first->GetEndTime());
+   for (auto t : channels) {
 
       auto SelT0 = t->TimeToLongSamples(mT0);
       auto SelT1 = t->TimeToLongSamples(mT1);
@@ -113,7 +115,7 @@ bool ContrastDialog::GetDB(float &dB)
       }
 
       // Don't throw in this analysis dialog
-      rms = t->GetRMS(mT0, mT1, false);
+      rms = WaveChannelUtilities::GetRMS(*t, mT0, mT1, false);
       meanSq += rms * rms;
    }
    // TODO: This works for stereo, provided the audio clips are in both channels.
@@ -124,7 +126,7 @@ bool ContrastDialog::GetDB(float &dB)
 
    // Gives warning C4056, Overflow in floating-point constant arithmetic
    // -INFINITY is intentional here.
-   // Looks like we are stuck with this warning, as 
+   // Looks like we are stuck with this warning, as
    // #pragma warning( disable : 4056)
    // even around the whole function does not disable it successfully.
 
@@ -212,8 +214,7 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
    wxString number;
 
    auto p = FindProjectFromWindow( this );
-   const auto &settings = ProjectSettings::Get( *p );
-   mProjectRate = settings.GetRate();
+   mProjectRate = ProjectRate::Get(*p).GetRate();
 
       const auto options = NumericTextCtrl::Options{}
          .AutoPos(true)
@@ -247,11 +248,11 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
          if (S.GetMode() == eIsCreating)
          {
             mForegroundStartT = safenew
-               NumericTextCtrl(S.GetParent(), ID_FOREGROUNDSTART_T,
-                         NumericConverter::TIME,
-                         NumericConverter::HundredthsFormat(),
+               NumericTextCtrl(FormatterContext::SampleRateContext(mProjectRate),
+                         S.GetParent(), ID_FOREGROUNDSTART_T,
+                         NumericConverterType_TIME(),
+                         NumericConverterFormats::HundredthsFormat().Internal(),
                          0.0,
-                         mProjectRate,
                          options);
          }
          S.Name(XO("Foreground start time"))
@@ -260,11 +261,11 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
          if (S.GetMode() == eIsCreating)
          {
             mForegroundEndT = safenew
-               NumericTextCtrl(S.GetParent(), ID_FOREGROUNDEND_T,
-                         NumericConverter::TIME,
-                         NumericConverter::HundredthsFormat(),
+               NumericTextCtrl(FormatterContext::SampleRateContext(mProjectRate),
+                         S.GetParent(), ID_FOREGROUNDEND_T,
+                         NumericConverterType_TIME(),
+                         NumericConverterFormats::HundredthsFormat().Internal(),
                          0.0,
-                         mProjectRate,
                          options);
          }
          S.Name(XO("Foreground end time"))
@@ -281,11 +282,11 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
          if (S.GetMode() == eIsCreating)
          {
             mBackgroundStartT = safenew
-               NumericTextCtrl(S.GetParent(), ID_BACKGROUNDSTART_T,
-                         NumericConverter::TIME,
-                         NumericConverter::HundredthsFormat(),
+               NumericTextCtrl(FormatterContext::SampleRateContext(mProjectRate),
+                         S.GetParent(), ID_BACKGROUNDSTART_T,
+                         NumericConverterType_TIME(),
+                         NumericConverterFormats::HundredthsFormat().Internal(),
                          0.0,
-                         mProjectRate,
                          options);
          }
          S.Name(XO("Background start time"))
@@ -294,11 +295,11 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
          if (S.GetMode() == eIsCreating)
          {
             mBackgroundEndT = safenew
-               NumericTextCtrl(S.GetParent(), ID_BACKGROUNDEND_T,
-                         NumericConverter::TIME,
-                         NumericConverter::HundredthsFormat(),
+               NumericTextCtrl(FormatterContext::SampleRateContext(mProjectRate),
+                         S.GetParent(), ID_BACKGROUNDEND_T,
+                         NumericConverterType_TIME(),
+                         NumericConverterFormats::HundredthsFormat().Internal(),
                          0.0,
-                         mProjectRate,
                          options);
          }
          S.Name(XO("Background end time"))
@@ -361,7 +362,7 @@ void ContrastDialog::OnGetURL(wxCommandEvent & WXUNUSED(event))
 {
    // Original help page is back on-line (March 2016), but the manual should be more reliable.
    // http://www.eramp.com/WCAG_2_audio_contrast_tool_help.htm
-   HelpSystem::ShowHelp(this, wxT("Contrast"));
+   HelpSystem::ShowHelp(this, L"Contrast");
 }
 
 void ContrastDialog::OnClose(wxCommandEvent & WXUNUSED(event))
@@ -377,7 +378,7 @@ void ContrastDialog::OnGetForeground(wxCommandEvent & /*event*/)
    auto p = FindProjectFromWindow( this );
    auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
 
-   if( TrackList::Get( *p ).Selected< const WaveTrack >() ) {
+   if (TrackList::Get(*p).Selected<const WaveTrack>()) {
       mForegroundStartT->SetValue(selectedRegion.t0());
       mForegroundEndT->SetValue(selectedRegion.t1());
    }
@@ -393,7 +394,7 @@ void ContrastDialog::OnGetBackground(wxCommandEvent & /*event*/)
    auto p = FindProjectFromWindow( this );
    auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
 
-   if( TrackList::Get( *p ).Selected< const WaveTrack >() ) {
+   if (TrackList::Get(*p).Selected<const WaveTrack>()) {
       mBackgroundStartT->SetValue(selectedRegion.t0());
       mBackgroundEndT->SetValue(selectedRegion.t1());
    }
@@ -532,7 +533,7 @@ void ContrastDialog::OnExport(wxCommandEvent & WXUNUSED(event))
    auto project = FindProjectFromWindow( this );
    wxString fName = wxT("contrast.txt");
 
-   fName = FileNames::SelectFile(FileNames::Operation::Export,
+   fName = SelectFile(FileNames::Operation::Export,
       XO("Export Contrast Result As:"),
       wxEmptyString,
       fName,
@@ -650,16 +651,16 @@ void ContrastDialog::OnReset(wxCommandEvent & /*event*/)
 }
 
 // Remaining code hooks this add-on into the application
-#include "commands/CommandContext.h"
-#include "commands/CommandManager.h"
-#include "../commands/ScreenshotCommand.h"
+#include "CommandContext.h"
+#include "CommandManager.h"
+#include "ProjectWindows.h"
 
 namespace {
 
 // Contrast window attached to each project is built on demand by:
-AudacityProject::AttachedWindows::RegisteredFactory sContrastDialogKey{
+AttachedWindows::RegisteredFactory sContrastDialogKey{
    []( AudacityProject &parent ) -> wxWeakRef< wxWindow > {
-      auto &window = ProjectWindow::Get( parent );
+      auto &window = GetProjectFrame(parent);
       return safenew ContrastDialog(
          &window, -1, XO("Contrast Analysis (WCAG 2 compliance)"),
          wxPoint{ 150, 150 }
@@ -668,37 +669,28 @@ AudacityProject::AttachedWindows::RegisteredFactory sContrastDialogKey{
 };
 
 // Define our extra menu item that invokes that factory
-struct Handler : CommandHandlerObject {
+namespace {
    void OnContrast(const CommandContext &context)
    {
       auto &project = context.project;
-      CommandManager::Get(project).RegisterLastAnalyzer(context);  //Register Contrast as Last Analyzer
-      auto contrastDialog =
-         &project.AttachedWindows::Get< ContrastDialog >( sContrastDialogKey );
+      CommandManager::Get(project).RegisterLastAnalyzer(context);
+      auto contrastDialog = &GetAttachedWindows(project)
+         .Get< ContrastDialog >( sContrastDialogKey );
 
       contrastDialog->CentreOnParent();
-      if( ScreenshotCommand::MayCapture( contrastDialog ) )
-         return;
       contrastDialog->Show();
    }
-};
-
-CommandHandlerObject &findCommandHandler(AudacityProject &) {
-   // Handler is not stateful.  Doesn't need a factory registered with
-   // AudacityProject.
-   static Handler instance;
-   return instance;
 }
 
 // Register that menu item
 
-using namespace MenuTable;
-AttachedItem sAttachment{ wxT("Analyze/Analyzers/Windows"),
-   ( FinderScope{ findCommandHandler },
-      Command( wxT("ContrastAnalyser"), XXO("Contrast..."),
-         &Handler::OnContrast,
-         AudioIONotBusyFlag() | WaveTracksSelectedFlag() | TimeSelectedFlag(),
-         wxT("Ctrl+Shift+T") ) )
+using namespace MenuRegistry;
+AttachedItem sAttachment{
+   Command( wxT("ContrastAnalyser"), XXO("Contrast..."),
+      OnContrast,
+      AudioIONotBusyFlag() | WaveTracksSelectedFlag() | TimeSelectedFlag(),
+      wxT("Ctrl+Shift+T") ),
+   wxT("Analyze/Analyzers/Windows")
 };
 
 }

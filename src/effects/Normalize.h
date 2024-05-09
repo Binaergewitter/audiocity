@@ -12,17 +12,23 @@
 #ifndef __AUDACITY_EFFECT_NORMALIZE__
 #define __AUDACITY_EFFECT_NORMALIZE__
 
-#include "Effect.h"
+#include "StatefulEffect.h"
 #include "Biquad.h"
+#include "ShuttleAutomation.h"
+#include <wx/weakref.h>
+#include <functional>
 
 class wxCheckBox;
 class wxStaticText;
 class wxTextCtrl;
 class ShuttleGui;
+class WaveChannel;
 
-class EffectNormalize final : public Effect
+class EffectNormalize final : public StatefulEffect
 {
 public:
+   static inline EffectNormalize *
+   FetchParameters(EffectNormalize &e, EffectSettings &) { return &e; }
    static const ComponentInterfaceSymbol Symbol;
 
    EffectNormalize();
@@ -30,45 +36,46 @@ public:
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
-   wxString ManualPage() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+   ManualPageID ManualPage() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
-
-   // EffectClientInterface implementation
-
-   bool DefineParams( ShuttleParams & S ) override;
-   bool GetAutomationParameters(CommandParameters & parms) override;
-   bool SetAutomationParameters(CommandParameters & parms) override;
+   EffectType GetType() const override;
 
    // Effect implementation
 
-   bool CheckWhetherSkipEffect() override;
-   bool Startup() override;
-   bool Process() override;
-   void PopulateOrExchange(ShuttleGui & S) override;
-   bool TransferDataToWindow() override;
-   bool TransferDataFromWindow() override;
+   bool CheckWhetherSkipEffect(const EffectSettings &settings) const override;
+   bool Process(EffectInstance &instance, EffectSettings &settings) override;
+   std::unique_ptr<EffectEditor> PopulateOrExchange(
+      ShuttleGui & S, EffectInstance &instance,
+      EffectSettingsAccess &access, const EffectOutputs *pOutputs) override;
+   bool TransferDataToWindow(const EffectSettings &settings) override;
+   bool TransferDataFromWindow(EffectSettings &settings) override;
 
 private:
    // EffectNormalize implementation
 
-   bool ProcessOne(
-      WaveTrack * t, const TranslatableString &msg, double& progress, float offset);
-   bool AnalyseTrack(const WaveTrack * track, const TranslatableString &msg,
-                     double &progress, float &offset, float &extent);
-   bool AnalyseTrackData(const WaveTrack * track, const TranslatableString &msg, double &progress,
-                     float &offset);
-   void AnalyseDataDC(float *buffer, size_t len);
+   bool ProcessOne(WaveChannel &track,
+      const TranslatableString &msg, double& progress, float offset);
+   using ProgressReport = std::function<bool(double fraction)>;
+   static bool AnalyseTrack(const WaveChannel &track,
+      const ProgressReport &report,
+      bool gain, bool dc, double curT0, double curT1,
+      float &offset, float &extent);
+   static bool AnalyseTrackData(const WaveChannel &track,
+      const ProgressReport &report, double curT0, double curT1,
+      float &offset);
+   static double AnalyseDataDC(float *buffer, size_t len, double sum);
    void ProcessData(float *buffer, size_t len, float offset);
 
    void OnUpdateUI(wxCommandEvent & evt);
    void UpdateUI();
 
 private:
+   wxWeakRef<wxWindow> mUIParent{};
+
    double mPeakLevel;
    bool   mGain;
    bool   mDC;
@@ -77,7 +84,6 @@ private:
    double mCurT0;
    double mCurT1;
    float  mMult;
-   double mSum;
 
    wxCheckBox *mGainCheckBox;
    wxCheckBox *mDCCheckBox;
@@ -87,8 +93,17 @@ private:
    wxCheckBox *mStereoIndCheckBox;
    bool mCreating;
 
-
+   const EffectParameterMethods& Parameters() const override;
    DECLARE_EVENT_TABLE()
+
+static constexpr EffectParameter PeakLevel{ &EffectNormalize::mPeakLevel,
+   L"PeakLevel",           -1.0,    -145.0,  0.0,  1  };
+static constexpr EffectParameter RemoveDC{ &EffectNormalize::mDC,
+   L"RemoveDcOffset",      true,    false,   true, 1  };
+static constexpr EffectParameter ApplyGain{ &EffectNormalize::mGain,
+   L"ApplyGain",           true,    false,   true, 1  };
+static constexpr EffectParameter StereoInd{ &EffectNormalize::mStereoInd,
+   L"StereoIndependent",   false,   false,   true, 1  };
 };
 
 #endif

@@ -14,11 +14,11 @@
 #ifndef __AUDACITY_EFFECT_SBSMS__
 #define __AUDACITY_EFFECT_SBSMS__
 
-#include "../Audacity.h" // for USE_* macros
+
 
 #if USE_SBSMS
 
-#include "Effect.h"
+#include "StatefulEffect.h"
 #include <sbsms.h>
 
 using namespace _sbsms_;
@@ -26,10 +26,10 @@ using namespace _sbsms_;
 class LabelTrack;
 class TimeWarper;
 
-class EffectSBSMS /* not final */ : public Effect
+class EffectSBSMS /* not final */ : public StatefulEffect
 {
 public:
-   bool Process() override;
+   bool Process(EffectInstance &instance, EffectSettings &settings) override;
    void setParameters(double rateStart, double rateEnd, double pitchStart, double pitchEnd,
                       SlideType rateSlideType, SlideType pitchSlideType,
                       bool bLinkRatePitch, bool bRateReferenceInput, bool bPitchReferenceInput);
@@ -42,19 +42,23 @@ protected:
    // This supplies the abstract virtual function, but in fact this symbol
    // does not get used:  this class is either a temporary helper, or else
    // GetSymbol() is overridden further in derived classes.
-   ComponentInterfaceSymbol GetSymbol() override { return mProxyEffectName; }
+   ComponentInterfaceSymbol GetSymbol() const override { return mProxyEffectName; }
 
 private:
+   EffectType GetType() const override;
+
    bool ProcessLabelTrack(LabelTrack *track);
-   void Finalize(WaveTrack* orig, WaveTrack* out, const TimeWarper *warper);
+   /*!
+    @pre `orig.NChannels() == out.NChannels()`
+    */
+   void Finalize(
+      WaveTrack &orig, const WaveTrack &out, const TimeWarper &warper);
 
    double rateStart, rateEnd, pitchStart, pitchEnd;
    bool bLinkRatePitch, bRateReferenceInput, bPitchReferenceInput;
    SlideType rateSlideType;
    SlideType pitchSlideType;
    int mCurTrackNum;
-   double mCurT0;
-   double mCurT1;
    float mTotalStretch;
 
    friend class EffectChangeTempo;

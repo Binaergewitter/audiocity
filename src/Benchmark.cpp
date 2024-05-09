@@ -15,37 +15,34 @@ of sample block storage.
 *//*******************************************************************/
 
 
-#include "Audacity.h"
+
 #include "Benchmark.h"
 
 #include <wx/app.h>
 #include <wx/log.h>
 #include <wx/textctrl.h>
-#include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
-#include <wx/dialog.h>
-#include <wx/sizer.h>
 #include <wx/stattext.h>
-#include <wx/timer.h>
-#include <wx/utils.h>
+#include <wx/stopwatch.h>
 #include <wx/valgen.h>
 #include <wx/valtext.h>
-#include <wx/intl.h>
 
+#include "Project.h"
+#include "ProjectTimeSignature.h"
 #include "SampleBlock.h"
 #include "ShuttleGui.h"
-#include "Project.h"
+#include "TempoChange.h"
 #include "WaveClip.h"
 #include "WaveTrack.h"
 #include "Sequence.h"
 #include "Prefs.h"
-#include "ProjectSettings.h"
-#include "ViewInfo.h"
+#include "ProjectRate.h"
 
 #include "FileNames.h"
-#include "widgets/AudacityMessageBox.h"
-#include "widgets/wxPanelWrapper.h"
+#include "SelectFile.h"
+#include "AudacityMessageBox.h"
+#include "wxPanelWrapper.h"
 
 // Change these to the desired format...should probably make the
 // choice available in the dialog
@@ -72,7 +69,7 @@ private:
    void FlushPrint();
 
    AudacityProject &mProject;
-   const ProjectSettings &mSettings;
+   const ProjectRate &mRate;
 
    bool      mHoldPrint;
    wxString  mToPrint;
@@ -145,7 +142,7 @@ BenchmarkDialog::BenchmarkDialog(
                 wxDEFAULT_DIALOG_STYLE |
                 wxRESIZE_BORDER)
    , mProject(project)
-   , mSettings{ ProjectSettings::Get(project) }
+   , mRate{ ProjectRate::Get(project) }
 {
    SetName();
 
@@ -272,7 +269,7 @@ void BenchmarkDialog::OnSave( wxCommandEvent & WXUNUSED(event))
    leave untranslated file extension .txt */
    auto fName = XO("benchmark.txt").Translation();
 
-   fName = FileNames::SelectFile(FileNames::Operation::Export,
+   fName = SelectFile(FileNames::Operation::Export,
       XO("Export Benchmark Data as:"),
       wxEmptyString,
       fName,
@@ -353,10 +350,8 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
       return;
    }
 
-   bool editClipCanMove = true;
-   gPrefs->Read(wxT("/GUI/EditClipCanMove"), &editClipCanMove);
-   gPrefs->Write(wxT("/GUI/EditClipCanMove"), false);
-   gPrefs->Flush();
+   SettingScope scope;
+   EditClipsCanMove.Write( false );
 
    // Remember the old blocksize, so that we can restore it later.
    auto oldBlockSize = Sequence::GetMaxDiskBlockSize();
@@ -364,8 +359,6 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
 
    const auto cleanup = finally( [&] {
       Sequence::SetMaxDiskBlockSize(oldBlockSize);
-      gPrefs->Write(wxT("/GUI/EditClipCanMove"), editClipCanMove);
-      gPrefs->Flush();
    } );
 
    wxBusyCursor busy;
@@ -373,9 +366,12 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    HoldPrint(true);
 
    const auto t =
-      WaveTrackFactory{ mSettings,
+      WaveTrackFactory{ mRate,
                     SampleBlockFactory::New( mProject )  }
-         .NewWaveTrack(SampleFormat);
+         .Create(SampleFormat, mRate.GetRate());
+   const auto tmp0 = TrackList::Temporary(nullptr, t);
+   const auto tempo = ProjectTimeSignature::Get(mProject).GetTempo();
+   DoProjectTempoChange(*t, tempo);
 
    t->SetRate(1);
 
@@ -422,7 +418,7 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
       for (uint64_t b = 0; b < chunkSize; b++)
          block[b] = v;
 
-      t->Append((samplePtr)block.get(), SampleFormat, chunkSize);
+      t->Append(0, (samplePtr)block.get(), SampleFormat, chunkSize);
    }
    t->Flush();
 
@@ -431,11 +427,11 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    // as we're about to do).
    t->GetEndTime();
 
-   if (t->GetClipByIndex(0)->GetSequence()->GetNumSamples() != nChunks * chunkSize) {
+   if (t->GetClip(0)->GetVisibleSampleCount() != nChunks * chunkSize) {
       Printf( XO("Expected len %lld, track len %lld.\n")
          .Format(
             nChunks * chunkSize,
-            t->GetClipByIndex(0)->GetSequence()->GetNumSamples()
+            t->GetClip(0)->GetVisibleSampleCount()
                .as_long_long() ) );
       goto fail;
    }
@@ -459,7 +455,8 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
 
       Track::Holder tmp;
       try {
-         tmp = t->Cut(double (x0 * chunkSize), double ((x0 + xlen) * chunkSize));
+         tmp =
+            t->Cut(double (x0 * chunkSize), double ((x0 + xlen) * chunkSize));
       }
       catch (const AudacityException&) {
          Printf( XO("Trial %d\n").Format( z ) );
@@ -468,7 +465,7 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
          Printf( XO("Expected len %lld, track len %lld.\n")
             .Format(
                nChunks * chunkSize,
-               t->GetClipByIndex(0)->GetSequence()->GetNumSamples()
+               t->GetClip(0)->GetVisibleSampleCount()
                   .as_long_long() ) );
          goto fail;
       }
@@ -481,19 +478,19 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
          Printf( XO("Paste: %lld\n").Format( y0 * chunkSize ) );
 
       try {
-         t->Paste((double)(y0 * chunkSize), tmp.get());
+         t->Paste((double)(y0 * chunkSize), *tmp);
       }
       catch (const AudacityException&) {
          Printf( XO("Trial %d\nFailed on Paste.\n").Format( z ) );
          goto fail;
       }
 
-      if (t->GetClipByIndex(0)->GetSequence()->GetNumSamples() != nChunks * chunkSize) {
+      if (t->GetClip(0)->GetVisibleSampleCount() != nChunks * chunkSize) {
          Printf( XO("Trial %d\n").Format( z ) );
          Printf( XO("Expected len %lld, track len %lld.\n")
             .Format(
                nChunks * chunkSize,
-               t->GetClipByIndex(0)->GetSequence()->GetNumSamples()
+               t->GetClip(0)->GetVisibleSampleCount()
                   .as_long_long() ) );
          goto fail;
       }
@@ -508,7 +505,8 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    elapsed = timer.Time();
 
    if (mBlockDetail) {
-      auto seq = t->GetClipByIndex(0)->GetSequence();
+      // One remaining old direct use of narrow clips, only for debugging
+      auto seq = t->GetClip(0)->GetSequence(0);
       seq->DebugPrintf(seq->GetBlockArray(), seq->GetNumSamples(), &tempStr);
       mToPrint += tempStr;
    }
@@ -532,7 +530,9 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    timer.Start();
    for (uint64_t i = 0; i < nChunks; i++) {
       v = small1[i];
-      t->Get((samplePtr)block.get(), SampleFormat, i * chunkSize, chunkSize);
+      auto pBlock = reinterpret_cast<samplePtr>(block.get());
+      constexpr auto backwards = false;
+      t->DoGet(0, 1, &pBlock, SampleFormat, i * chunkSize, chunkSize, backwards);
       for (uint64_t b = 0; b < chunkSize; b++)
          if (block[b] != v) {
             bad++;
@@ -558,7 +558,9 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
 
    for (uint64_t i = 0; i < nChunks; i++) {
       v = small1[i];
-      t->Get((samplePtr)block.get(), SampleFormat, i * chunkSize, chunkSize);
+      auto pBlock = reinterpret_cast<samplePtr>(block.get());
+      constexpr auto backwards = false;
+      t->DoGet(0, 1, &pBlock, SampleFormat, i * chunkSize, chunkSize, backwards);
       for (uint64_t b = 0; b < chunkSize; b++)
          if (block[b] != v)
             bad++;

@@ -11,9 +11,9 @@ Paul Licameli
 #ifndef __AUDACITY_TRACK_PANEL_CELL__
 #define __AUDACITY_TRACK_PANEL_CELL__
 
-#include "Audacity.h"
 
-#include "MemoryX.h"
+
+#include <memory>
 #include "TrackPanelDrawable.h" // to inherit
 
 class AudacityProject;
@@ -74,8 +74,8 @@ class AUDACITY_DLL_API TrackPanelCell /* not final */ : public TrackPanelNode
 {
 public:
    TrackPanelCell() = default;
-   TrackPanelCell( const TrackPanelCell & ) PROHIBITED;
-   TrackPanelCell &operator=( const TrackPanelCell & ) PROHIBITED;
+   TrackPanelCell( const TrackPanelCell & ) = delete;
+   TrackPanelCell &operator=( const TrackPanelCell & ) = delete;
 
    virtual ~TrackPanelCell () = 0;
 
@@ -109,7 +109,7 @@ public:
    // Default implementation does nothing
    virtual unsigned DoContextMenu
       (const wxRect &rect,
-       wxWindow *pParent, wxPoint *pPosition, AudacityProject *pProject);
+       wxWindow *pParent, const wxPoint *pPosition, AudacityProject *pProject);
 
    // Return value is a bitwise OR of RefreshCode values
    // Default skips the event and does nothing
@@ -134,6 +134,11 @@ public:
    virtual unsigned Char
       (wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *pParent,
        AudacityProject *project);
+
+   // Return value is a bitwise OR of RefreshCode values
+   // Notification to the focused cell that the CellularPanel is losing focus
+   // Default does nothing, returns RefreshCode::RefreshNone
+   virtual unsigned LoseFocus(AudacityProject *project);
 };
 
 #endif

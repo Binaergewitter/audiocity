@@ -14,17 +14,17 @@
 *//*******************************************************************/
 
 
-#include "../Audacity.h"
+
 #include "ExtImportPrefs.h"
 
 #include <wx/defs.h>
 #include <wx/listctrl.h>
 #include <wx/dnd.h>
 
-#include "../Prefs.h"
-#include "../ShuttleGui.h"
-#include "../import/Import.h"
-#include "../widgets/AudacityMessageBox.h"
+#include "Prefs.h"
+#include "ShuttleGui.h"
+#include "Import.h"
+#include "AudacityMessageBox.h"
 #include "../widgets/Grid.h"
 
 #define EXTIMPORT_MIME_SUPPORT 0
@@ -74,17 +74,17 @@ ExtImportPrefs::~ExtImportPrefs()
 {
 }
 
-ComponentInterfaceSymbol ExtImportPrefs::GetSymbol()
+ComponentInterfaceSymbol ExtImportPrefs::GetSymbol() const
 {
    return EXT_IMPORT_PREFS_PLUGIN_SYMBOL;
 }
 
-TranslatableString ExtImportPrefs::GetDescription()
+TranslatableString ExtImportPrefs::GetDescription() const
 {
    return XO("Preferences for ExtImport");
 }
 
-wxString ExtImportPrefs::HelpPageName()
+ManualPageID ExtImportPrefs::HelpPageName()
 {
    return "Extended_Import_Preferences";
 }
@@ -120,7 +120,7 @@ void ExtImportPrefs::PopulateOrExchange(ShuttleGui & S)
          bool fillRuleTable = false;
          if (RuleTable == NULL)
          {
-            RuleTable = safenew Grid(S.GetParent(),EIPRuleTable);
+            RuleTable = safenew Grid(FormatterContext::EmptyContext(), S.GetParent(),EIPRuleTable);
 
             RuleTable->SetColLabelSize(RuleTable->GetDefaultRowSize());
 #if EXTIMPORT_MIME_SUPPORT

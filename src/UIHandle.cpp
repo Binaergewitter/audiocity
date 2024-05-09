@@ -7,11 +7,10 @@ UIHandle.cpp
 Paul Licameli
 
 **********************************************************************/
-
-#include "Audacity.h"
 #include "UIHandle.h"
-
+#include "Channel.h"
 #include "RefreshCode.h"
+#include "Track.h"
 
 UIHandle::~UIHandle()
 {
@@ -31,12 +30,17 @@ bool UIHandle::Rotate(bool)
    return false;
 }
 
-bool UIHandle::HasEscape() const
+bool UIHandle::HasEscape(AudacityProject *) const
 {
    return false;
 }
 
 bool UIHandle::Escape(AudacityProject *)
+{
+   return false;
+}
+
+bool UIHandle::HandlesRightClick()
 {
    return false;
 }
@@ -48,4 +52,18 @@ bool UIHandle::StopsOnKeystroke()
 
 void UIHandle::OnProjectChange(AudacityProject *)
 {
+}
+
+bool UIHandle::IsDragging() const
+{
+   return false;
+}
+
+std::shared_ptr<const Track>
+UIHandle::TrackFromChannel(const std::shared_ptr<const Channel> &pChannel)
+{
+   return pChannel
+      ? static_cast<const Track &>(pChannel->GetChannelGroup())
+         .shared_from_this()
+      : nullptr;
 }

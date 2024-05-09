@@ -16,10 +16,14 @@
 #include <wx/defs.h>
 #include <wx/weakref.h> // member variable
 
-#include "audacity/Types.h"
-#include "../MemoryX.h"
+#include "Identifier.h"
+#include "wxArrayStringEx.h"
 
-class wxConfigBase;
+namespace audacity
+{
+   class BasicSettings;
+}
+
 class wxMenu;
 
 class AUDACITY_DLL_API FileHistory
@@ -48,8 +52,8 @@ class AUDACITY_DLL_API FileHistory
    // also whenever the history changes.
    void UseMenu(wxMenu *menu);
 
-   void Load(wxConfigBase& config, const wxString & group = wxEmptyString);
-   void Save(wxConfigBase& config);
+   void Load(audacity::BasicSettings& config, const wxString & group = wxEmptyString);
+   void Save(audacity::BasicSettings& config);
 
    // stl-style accessors
    using const_iterator = FilePaths::const_iterator;

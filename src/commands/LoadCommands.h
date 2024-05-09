@@ -12,12 +12,12 @@
 #ifndef __AUDACITY_LOAD_COMMANDS__
 #define __AUDACITY_LOAD_COMMANDS__
 
-#include "audacity/ModuleInterface.h"
+#include "PluginProvider.h"
 
 #include <functional>
 #include <memory>
 #include <unordered_map>
-#include "../MemoryX.h"
+#include <memory>
 
 class AudacityCommand;
 
@@ -27,10 +27,10 @@ class AudacityCommand;
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-class BuiltinCommandsModule final : public ModuleInterface
+class AUDACITY_DLL_API BuiltinCommandsModule final : public PluginProvider
 {
 public:
-   BuiltinCommandsModule(const wxString *path);
+   BuiltinCommandsModule();
    virtual ~BuiltinCommandsModule();
 
    using Factory = std::function< std::unique_ptr<AudacityCommand> () >;
@@ -45,13 +45,13 @@ public:
 
    // ComponentInterface implementation
 
-   PluginPath GetPath() override;
-   ComponentInterfaceSymbol GetSymbol() override;
-   VendorSymbol GetVendor() override;
-   wxString GetVersion() override;
-   TranslatableString GetDescription() override;
+   PluginPath GetPath() const override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   VendorSymbol GetVendor() const override;
+   wxString GetVersion() const override;
+   TranslatableString GetDescription() const override;
 
-   // ModuleInterface implementation
+   // PluginProvider implementation
 
    bool Initialize() override;
    void Terminate() override;
@@ -60,17 +60,17 @@ public:
    const FileExtensions &GetFileExtensions() override;
    FilePath InstallPath() override { return {}; }
 
-   bool AutoRegisterPlugins(PluginManagerInterface & pm) override;
-   PluginPaths FindPluginPaths(PluginManagerInterface & pm) override;
+   void AutoRegisterPlugins(PluginManagerInterface & pm) override;
+   PluginPaths FindModulePaths(PluginManagerInterface & pm) override;
    unsigned DiscoverPluginsAtPath(
       const PluginPath & path, TranslatableString &errMsg,
       const RegistrationCallback &callback)
          override;
 
-   bool IsPluginValid(const PluginPath & path, bool bFast) override;
+   bool CheckPluginExist(const PluginPath& path) const override;
 
-   ComponentInterface *CreateInstance(const PluginPath & path) override;
-   void DeleteInstance(ComponentInterface *instance) override;
+   std::unique_ptr<ComponentInterface>
+      LoadPlugin(const PluginPath & path) override;
 
 private:
    // BuiltinEffectModule implementation
@@ -82,8 +82,6 @@ private:
 
    static void DoRegistration(
       const ComponentInterfaceSymbol &name, const Factory &factory );
-
-   wxString mPath;
 
    using CommandHash = std::unordered_map< wxString, const Entry* > ;
    CommandHash mCommands;

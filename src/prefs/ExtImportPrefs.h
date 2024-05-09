@@ -16,7 +16,7 @@
 
 #include "PrefsPanel.h"
 
-#include "../import/ImportPlugin.h"
+#include "ImportPlugin.h"
 
 class wxButton;
 class wxGridEvent;
@@ -51,11 +51,11 @@ class ExtImportPrefs final : public PrefsPanel
  public:
    ExtImportPrefs(wxWindow * parent, wxWindowID winid);
    ~ExtImportPrefs();
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
 
    bool Commit() override;
-   wxString HelpPageName() override;
+   ManualPageID HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // See bug #2315 for discussion. This should be reviewed

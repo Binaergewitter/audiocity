@@ -14,7 +14,8 @@
 #ifndef __AUDACITY_EFFECT_DTMF__
 #define __AUDACITY_EFFECT_DTMF__
 
-#include "Effect.h"
+#include "StatelessPerTrackEffect.h"
+#include "ShuttleAutomation.h"
 
 class wxSlider;
 class wxStaticText;
@@ -22,7 +23,23 @@ class wxTextCtrl;
 class NumericTextCtrl;
 class ShuttleGui;
 
-class EffectDtmf final : public Effect
+struct DtmfSettings {
+   static constexpr wchar_t DefaultSequence[] = L"audacity";
+   static constexpr double DefaultDutyCycle = 55.0;
+   static constexpr double DefaultAmplitude = 0.8;
+
+   wxString dtmfSequence{DefaultSequence}; // dtmf tone string
+   size_t dtmfNTones = dtmfSequence.length(); // total number of tones to generate
+   double dtmfTone{};               // duration of a single tone in ms
+   double dtmfSilence{};            // duration of silence between tones in ms
+   double dtmfDutyCycle{DefaultDutyCycle}; // ratio of dtmfTone/(dtmfTone+dtmfSilence)
+   double dtmfAmplitude{DefaultAmplitude}; // amplitude of dtmf tone sequence, restricted to (0-1)
+
+   void Recalculate(EffectSettings &settings);
+};
+
+class EffectDtmf final
+   : public EffectWithSettings<DtmfSettings, StatelessPerTrackEffect>
 {
 public:
    static const ComponentInterfaceSymbol Symbol;
@@ -32,72 +49,43 @@ public:
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
-   wxString ManualPage() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+   ManualPageID ManualPage() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
-
-   // EffectClientInterface implementation
-
-   unsigned GetAudioOutCount() override;
-   bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
-   size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
-   bool DefineParams( ShuttleParams & S ) override;
-   bool GetAutomationParameters(CommandParameters & parms) override;
-   bool SetAutomationParameters(CommandParameters & parms) override;
+   EffectType GetType() const override;
 
    // Effect implementation
 
-   bool Startup() override;
-   bool Init() override;
-   void PopulateOrExchange(ShuttleGui & S) override;
-   bool TransferDataFromWindow() override;
-   bool TransferDataToWindow() override;
+   std::unique_ptr<EffectEditor> MakeEditor(
+      ShuttleGui & S, EffectInstance &instance,
+      EffectSettingsAccess &access, const EffectOutputs *pOutputs)
+   const override;
+
+   struct Instance;
+   std::shared_ptr<EffectInstance> MakeInstance() const override;
 
 private:
    // EffectDtmf implementation
 
-   bool MakeDtmfTone(float *buffer, size_t len, float fs,
+   static bool MakeDtmfTone(float *buffer, size_t len, float fs,
                      wxChar tone, sampleCount last,
                      sampleCount total, float amplitude);
-   void Recalculate();
 
-   void UpdateUI();
-
-   void OnSequence(wxCommandEvent & evt);
-   void OnAmplitude(wxCommandEvent & evt);
-   void OnDuration(wxCommandEvent & evt);
-   void OnDutyCycle(wxCommandEvent & evt);
+public:
+   struct Editor;
 
 private:
-   sampleCount numSamplesSequence;  // total number of samples to generate
-   sampleCount numSamplesTone;      // number of samples in a tone block
-   sampleCount numSamplesSilence;   // number of samples in a silence block
-   sampleCount diff;                // number of extra samples to redistribute
-   sampleCount numRemaining;        // number of samples left to produce in the current block
-   sampleCount curTonePos;          // position in tone to start the wave
-   bool isTone;                     // true if block is tone, otherwise silence
-   int curSeqPos;                   // index into dtmf tone string
+   const EffectParameterMethods& Parameters() const override;
 
-   wxString dtmfSequence;             // dtmf tone string
-   int    dtmfNTones;               // total number of tones to generate
-   double dtmfTone;                 // duration of a single tone in ms
-   double dtmfSilence;              // duration of silence between tones in ms
-   double dtmfDutyCycle;            // ratio of dtmfTone/(dtmfTone+dtmfSilence)
-   double dtmfAmplitude;            // amplitude of dtmf tone sequence, restricted to (0-1)
-
-   wxTextCtrl *mDtmfSequenceT;
-   wxTextCtrl *mDtmfAmplitudeT;
-   wxSlider   *mDtmfDutyCycleS;
-   NumericTextCtrl *mDtmfDurationT;
-   wxStaticText *mDtmfToneT;
-   wxStaticText *mDtmfSilenceT;
-   wxStaticText *mDtmfDutyT;
-
-   DECLARE_EVENT_TABLE()
+static constexpr EffectParameter Sequence{ &DtmfSettings::dtmfSequence,
+   L"Sequence",   DtmfSettings::DefaultSequence, L"", L"", L""};
+static constexpr EffectParameter DutyCycle{ &DtmfSettings::dtmfDutyCycle,
+   L"Duty Cycle", DtmfSettings::DefaultDutyCycle, 0.0,     100.0,   10.0   };
+static constexpr EffectParameter Amplitude{ &DtmfSettings::dtmfAmplitude,
+   L"Amplitude",  DtmfSettings::DefaultAmplitude, 0.001,   1.0,     1      };
 };
 
 #endif

@@ -13,14 +13,18 @@
 #ifndef __AUDACITY_EFFECT_NOISE__
 #define __AUDACITY_EFFECT_NOISE__
 
-#include "Effect.h"
+#include "StatefulPerTrackEffect.h"
+#include "ShuttleAutomation.h"
+#include <wx/weakref.h>
 
 class NumericTextCtrl;
 class ShuttleGui;
 
-class EffectNoise final : public Effect
+class EffectNoise final : public StatefulPerTrackEffect
 {
 public:
+   static inline EffectNoise *
+   FetchParameters(EffectNoise &e, EffectSettings &) { return &e; }
    static const ComponentInterfaceSymbol Symbol;
 
    EffectNoise();
@@ -28,39 +32,57 @@ public:
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
-   wxString ManualPage() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+   ManualPageID ManualPage() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
+   EffectType GetType() const override;
 
-   // EffectClientInterface implementation
-
-   unsigned GetAudioOutCount() override;
-   size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
-   bool DefineParams( ShuttleParams & S ) override;
-   bool GetAutomationParameters(CommandParameters & parms) override;
-   bool SetAutomationParameters(CommandParameters & parms) override;
+   unsigned GetAudioOutCount() const override;
+   bool ProcessInitialize(EffectSettings &settings, double sampleRate,
+      ChannelNames chanMap) override;
+   size_t ProcessBlock(EffectSettings &settings,
+      const float *const *inBlock, float *const *outBlock, size_t blockLen)
+      override;
 
    // Effect implementation
 
-   bool Startup() override;
-   void PopulateOrExchange(ShuttleGui & S) override;
-   bool TransferDataToWindow() override;
-   bool TransferDataFromWindow() override;
+   std::unique_ptr<EffectEditor> PopulateOrExchange(
+      ShuttleGui & S, EffectInstance &instance,
+      EffectSettingsAccess &access, const EffectOutputs *pOutputs) override;
+   bool TransferDataToWindow(const EffectSettings &settings) override;
+   bool TransferDataFromWindow(EffectSettings &settings) override;
 
 private:
    // EffectNoise implementation
 
-private:
+   wxWeakRef<wxWindow> mUIParent{};
+
+   double mSampleRate{};
    int mType;
    double mAmp;
 
    float y, z, buf0, buf1, buf2, buf3, buf4, buf5, buf6;
 
    NumericTextCtrl *mNoiseDurationT;
+
+   const EffectParameterMethods& Parameters() const override;
+
+   enum kTypes
+   {
+      kWhite,
+      kPink,
+      kBrownian,
+      nTypes
+   };
+   static const EnumValueSymbol kTypeStrings[nTypes];
+
+static constexpr EnumParameter Type{ &EffectNoise::mType,
+   L"Type",       kWhite,  0,    nTypes - 1, 1, kTypeStrings, nTypes  };
+static constexpr EffectParameter Amp{ &EffectNoise::mAmp,
+   L"Amplitude",  0.8,     0.0,  1.0,           1  };
 };
 
 #endif

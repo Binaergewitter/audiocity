@@ -2,7 +2,7 @@
 
    Audacity: A Digital Audio Editor
    Audacity(R) is copyright (c) 1999-2016 Audacity Team.
-   License: GPL v2.  See License.txt.
+   License: GPL v2 or later.  See License.txt.
 
    BassTreble.h (two shelf filters)
    Steve Daulton
@@ -12,11 +12,9 @@
 #ifndef __AUDACITY_EFFECT_BASS_TREBLE__
 #define __AUDACITY_EFFECT_BASS_TREBLE__
 
-#include "Effect.h"
+#include "StatelessPerTrackEffect.h"
+#include "ShuttleAutomation.h"
 
-class wxSlider;
-class wxCheckBox;
-class wxTextCtrl;
 class ShuttleGui;
 
 class EffectBassTrebleState
@@ -33,9 +31,27 @@ public:
    double xn1Treble, xn2Treble, yn1Treble, yn2Treble;
 };
 
-class EffectBassTreble final : public Effect
+
+struct EffectBassTrebleSettings
+{
+   static constexpr double bassDefault   = 0.0;
+   static constexpr double trebleDefault = 0.0;
+   static constexpr double gainDefault   = 0.0;
+   static constexpr bool   linkDefault   = false;   
+
+   double mBass  { bassDefault   };
+   double mTreble{ trebleDefault };
+   double mGain  { gainDefault   };
+   bool   mLink  { linkDefault   };
+};
+
+
+class EffectBassTreble final : public EffectWithSettings<
+   EffectBassTrebleSettings, StatelessPerTrackEffect
+>
 {
 public:
+   
    static const ComponentInterfaceSymbol Symbol;
 
    EffectBassTreble();
@@ -43,82 +59,47 @@ public:
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
-   wxString ManualPage() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+   ManualPageID ManualPage() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
-   bool SupportsRealtime() override;
-
-   // EffectClientInterface implementation
-
-   unsigned GetAudioInCount() override;
-   unsigned GetAudioOutCount() override;
-   bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
-   size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
-   bool RealtimeInitialize() override;
-   bool RealtimeAddProcessor(unsigned numChannels, float sampleRate) override;
-   bool RealtimeFinalize() override;
-   size_t RealtimeProcess(int group,
-                               float **inbuf,
-                               float **outbuf,
-                               size_t numSamples) override;
-   bool DefineParams( ShuttleParams & S ) override;
-   bool GetAutomationParameters(CommandParameters & parms) override;
-   bool SetAutomationParameters(CommandParameters & parms) override;
+   EffectType GetType() const override;
+   RealtimeSince RealtimeSupport() const override;
 
 
    // Effect Implementation
 
-   void PopulateOrExchange(ShuttleGui & S) override;
-   bool TransferDataToWindow() override;
-   bool TransferDataFromWindow() override;
+   std::unique_ptr<EffectEditor> MakeEditor(
+      ShuttleGui & S, EffectInstance &instance,
+      EffectSettingsAccess &access, const EffectOutputs *pOutputs)
+   const override;
 
-   bool CheckWhetherSkipEffect() override;
+   bool CheckWhetherSkipEffect(const EffectSettings &settings) const override;
 
-private:
-   // EffectBassTreble implementation
+   struct Editor;
 
-   void InstanceInit(EffectBassTrebleState & data, float sampleRate);
-   size_t InstanceProcess(EffectBassTrebleState & data, float **inBlock, float **outBlock, size_t blockLen);
+   struct Instance;
 
-   void Coefficients(double hz, double slope, double gain, double samplerate, int type,
-                    double& a0, double& a1, double& a2, double& b0, double& b1, double& b2);
-   float DoFilter(EffectBassTrebleState & data, float in);
+   std::shared_ptr<EffectInstance> MakeInstance() const override;
 
-   void OnBassText(wxCommandEvent & evt);
-   void OnTrebleText(wxCommandEvent & evt);
-   void OnGainText(wxCommandEvent & evt);
-   void OnBassSlider(wxCommandEvent & evt);
-   void OnTrebleSlider(wxCommandEvent & evt);
-   void OnGainSlider(wxCommandEvent & evt);
-   void OnLinkCheckbox(wxCommandEvent & evt);
-
-   // Auto-adjust gain to reduce variation in peak level
-   void UpdateGain(double oldVal, int control );
 
 private:
-   EffectBassTrebleState mMaster;
-   std::vector<EffectBassTrebleState> mSlaves;
 
-   double      mBass;
-   double      mTreble;
-   double      mGain;
-   bool        mLink;
+   const EffectParameterMethods& Parameters() const override;
 
-   wxSlider    *mBassS;
-   wxSlider    *mTrebleS;
-   wxSlider    *mGainS;
+   static constexpr EffectParameter Bass{ &EffectBassTrebleSettings::mBass,
+                         L"Bass",          EffectBassTrebleSettings::bassDefault,     -30.0,   30.0,    1  };
 
-   wxTextCtrl  *mBassT;
-   wxTextCtrl  *mTrebleT;
-   wxTextCtrl  *mGainT;
+   static constexpr EffectParameter Treble{ &EffectBassTrebleSettings::mTreble,
+                         L"Treble",          EffectBassTrebleSettings::trebleDefault, -30.0,   30.0,    1  };
 
-   wxCheckBox  *mLinkCheckBox;
+   static constexpr EffectParameter Gain{ &EffectBassTrebleSettings::mGain,
+                         L"Gain",          EffectBassTrebleSettings::gainDefault,     -30.0,   30.0,    1  };
 
-   DECLARE_EVENT_TABLE()
+   static constexpr EffectParameter Link{ &EffectBassTrebleSettings::mLink,
+                         L"Link Sliders",  EffectBassTrebleSettings::linkDefault,      false,  true,    1  };
 };
 
 #endif

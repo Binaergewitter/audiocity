@@ -11,8 +11,8 @@
 #ifndef __AUDACITY_SPECTRAL_SELECTION_BAR_LISTENER__
 #define __AUDACITY_SPECTRAL_SELECTION_BAR_LISTENER__
 
-#include "../Audacity.h"
-#include "audacity/Types.h"
+
+#include "Identifier.h"
 
 class AUDACITY_DLL_API SpectralSelectionBarListener /* not final */ {
 
@@ -23,11 +23,11 @@ class AUDACITY_DLL_API SpectralSelectionBarListener /* not final */ {
 
    virtual double SSBL_GetRate() const = 0;
 
-   virtual const NumericFormatSymbol & SSBL_GetFrequencySelectionFormatName() = 0;
-   virtual void SSBL_SetFrequencySelectionFormatName(const NumericFormatSymbol & formatName) = 0;
+   virtual NumericFormatID SSBL_GetFrequencySelectionFormatName() = 0;
+   virtual void SSBL_SetFrequencySelectionFormatName(const NumericFormatID & formatName) = 0;
 
-   virtual const NumericFormatSymbol & SSBL_GetBandwidthSelectionFormatName() = 0;
-   virtual void SSBL_SetBandwidthSelectionFormatName(const NumericFormatSymbol & formatName) = 0;
+   virtual NumericFormatID SSBL_GetBandwidthSelectionFormatName() = 0;
+   virtual void SSBL_SetBandwidthSelectionFormatName(const NumericFormatID & formatName) = 0;
 
    virtual void SSBL_ModifySpectralSelection(double &bottom, double &top, bool done) = 0;
 };

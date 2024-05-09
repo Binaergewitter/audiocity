@@ -12,10 +12,11 @@ Paul Licameli split from TrackPanel.cpp
 #define __AUDACITY_TRACK_CONTROLS__
 
 #include "CommonTrackPanelCell.h"
+#include "TrackInfo.h"
 
 class Track;
 
-class TrackControls /* not final */ : public CommonTrackCell
+class AUDACITY_DLL_API TrackControls /* not final */ : public CommonTrackCell
    , public std::enable_shared_from_this< TrackControls >
 {
 public:
@@ -26,9 +27,13 @@ public:
    TrackControls( std::shared_ptr<Track> pTrack );
 
    virtual ~TrackControls() = 0;
+
+   // This decides what details to draw in the track control panel, besides
+   // those at the bottom
+   virtual const TrackInfo::TCPLines& GetTCPLines() const = 0;
 };
 
-#include "../../AttachedVirtualFunction.h"
+#include "AttachedVirtualFunction.h"
 
 struct DoGetControlsTag;
 
@@ -38,5 +43,6 @@ AttachedVirtualFunction<
    std::shared_ptr< TrackControls >,
    Track
 >;
+DECLARE_EXPORTED_ATTACHED_VIRTUAL(AUDACITY_DLL_API, DoGetControls);
 
 #endif

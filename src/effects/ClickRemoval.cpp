@@ -23,24 +23,22 @@
   and/or distribute it under the same terms as Audacity itself.
 
 *//*******************************************************************/
-
-#include "../Audacity.h"
 #include "ClickRemoval.h"
+#include "EffectEditor.h"
+#include "EffectOutputTracks.h"
 #include "LoadEffects.h"
 
 #include <math.h>
 
-#include <wx/intl.h>
 #include <wx/slider.h>
 #include <wx/valgen.h>
 
-#include "../Prefs.h"
-#include "../Shuttle.h"
-#include "../ShuttleGui.h"
-#include "../widgets/AudacityMessageBox.h"
+#include "Prefs.h"
+#include "ShuttleGui.h"
+#include "AudacityMessageBox.h"
 #include "../widgets/valnum.h"
 
-#include "../WaveTrack.h"
+#include "WaveTrack.h"
 
 enum
 {
@@ -48,11 +46,13 @@ enum
    ID_Width
 };
 
-// Define keys, defaults, minimums, and maximums for the effect parameters
-//
-//     Name       Type     Key               Def      Min      Max      Scale
-Param( Threshold, int,     wxT("Threshold"),  200,     0,       900,     1  );
-Param( Width,     int,     wxT("Width"),      20,      0,       40,      1  );
+const EffectParameterMethods& EffectClickRemoval::Parameters() const
+{
+   static CapturedParameters<EffectClickRemoval,
+      Threshold, Width
+   > parameters;
+   return parameters;
+}
 
 const ComponentInterfaceSymbol EffectClickRemoval::Symbol
 { XO("Click Removal") };
@@ -68,8 +68,7 @@ END_EVENT_TABLE()
 
 EffectClickRemoval::EffectClickRemoval()
 {
-   mThresholdLevel = DEF_Threshold;
-   mClickWidth = DEF_Width;
+   Parameters().Reset(*this);
 
    SetLinearEffectFlag(false);
 
@@ -83,145 +82,83 @@ EffectClickRemoval::~EffectClickRemoval()
 
 // ComponentInterface implementation
 
-ComponentInterfaceSymbol EffectClickRemoval::GetSymbol()
+ComponentInterfaceSymbol EffectClickRemoval::GetSymbol() const
 {
    return Symbol;
 }
 
-TranslatableString EffectClickRemoval::GetDescription()
+TranslatableString EffectClickRemoval::GetDescription() const
 {
    return XO("Click Removal is designed to remove clicks on audio tracks");
 }
 
-wxString EffectClickRemoval::ManualPage()
+ManualPageID EffectClickRemoval::ManualPage() const
 {
-   return wxT("Click_Removal");
+   return L"Click_Removal";
 }
 
 // EffectDefinitionInterface implementation
 
-EffectType EffectClickRemoval::GetType()
+EffectType EffectClickRemoval::GetType() const
 {
    return EffectTypeProcess;
 }
 
-// EffectClientInterface implementation
-bool EffectClickRemoval::DefineParams( ShuttleParams & S ){
-   S.SHUTTLE_PARAM( mThresholdLevel, Threshold );
-   S.SHUTTLE_PARAM( mClickWidth, Width );
-   return true;
-}
-
-bool EffectClickRemoval::GetAutomationParameters(CommandParameters & parms)
-{
-   parms.Write(KEY_Threshold, mThresholdLevel);
-   parms.Write(KEY_Width, mClickWidth);
-
-   return true;
-}
-
-bool EffectClickRemoval::SetAutomationParameters(CommandParameters & parms)
-{
-   ReadAndVerifyInt(Threshold);
-   ReadAndVerifyInt(Width);
-
-   mThresholdLevel = Threshold;
-   mClickWidth = Width;
-
-   return true;
-}
-
 // Effect implementation
 
-bool EffectClickRemoval::CheckWhetherSkipEffect()
+bool EffectClickRemoval::CheckWhetherSkipEffect(const EffectSettings &) const
 {
    return ((mClickWidth == 0) || (mThresholdLevel == 0));
 }
 
-bool EffectClickRemoval::Startup()
+bool EffectClickRemoval::Process(EffectInstance &, EffectSettings &)
 {
-   wxString base = wxT("/Effects/ClickRemoval/");
-
-   // Migrate settings from 2.1.0 or before
-
-   // Already migrated, so bail
-   if (gPrefs->Exists(base + wxT("Migrated")))
-   {
-      return true;
-   }
-
-   // Load the old "current" settings
-   if (gPrefs->Exists(base))
-   {
-      mThresholdLevel = gPrefs->Read(base + wxT("ClickThresholdLevel"), 200);
-      if ((mThresholdLevel < MIN_Threshold) || (mThresholdLevel > MAX_Threshold))
-      {  // corrupted Prefs?
-         mThresholdLevel = 0;  //Off-skip
-      }
-      mClickWidth = gPrefs->Read(base + wxT("ClickWidth"), 20);
-      if ((mClickWidth < MIN_Width) || (mClickWidth > MAX_Width))
-      {  // corrupted Prefs?
-         mClickWidth = 0;  //Off-skip
-      }
-
-      SaveUserPreset(GetCurrentSettingsGroup());
-
-      // Do not migrate again
-      gPrefs->Write(base + wxT("Migrated"), true);
-      gPrefs->Flush();
-   }
-
-   return true;
-}
-
-bool EffectClickRemoval::Process()
-{
-   this->CopyInputTracks(); // Set up mOutputTracks.
+   EffectOutputTracks outputs { *mTracks, GetType(), { { mT0, mT1 } } };
    bool bGoodResult = true;
    mbDidSomething = false;
 
    int count = 0;
-   for( auto track : mOutputTracks->Selected< WaveTrack >() ) {
+   for (auto track : outputs.Get().Selected<WaveTrack>()) {
       double trackStart = track->GetStartTime();
       double trackEnd = track->GetEndTime();
-      double t0 = mT0 < trackStart? trackStart: mT0;
-      double t1 = mT1 > trackEnd? trackEnd: mT1;
+      double t0 = std::max(mT0, trackStart);
+      double t1 = std::min(trackEnd, mT1);
 
       if (t1 > t0) {
          auto start = track->TimeToLongSamples(t0);
          auto end = track->TimeToLongSamples(t1);
          auto len = end - start;
-
-         if (!ProcessOne(count, track, start, len))
-         {
-            bGoodResult = false;
-            break;
-         }
+         for (const auto pChannel : track->Channels())
+            if (!ProcessOne(count++, *pChannel, start, len)) {
+               bGoodResult = false;
+               goto done;
+            }
       }
-
-      count++;
    }
+   done:
    if (bGoodResult && !mbDidSomething) // Processing successful, but ineffective.
-      Effect::MessageBox(
+      EffectUIServices::DoMessageBox(*this,
          XO("Algorithm not effective on this audio. Nothing changed."),
          wxOK | wxICON_ERROR );
 
-   this->ReplaceProcessedTracks(bGoodResult && mbDidSomething);
+   if (bGoodResult && mbDidSomething)
+      outputs.Commit();
+
    return bGoodResult && mbDidSomething;
 }
 
-bool EffectClickRemoval::ProcessOne(int count, WaveTrack * track, sampleCount start, sampleCount len)
+bool EffectClickRemoval::ProcessOne(
+   int count, WaveChannel &track, sampleCount start, sampleCount len)
 {
-   if (len <= windowSize / 2)
-   {
-      Effect::MessageBox(
+   if (len <= windowSize / 2) {
+      EffectUIServices::DoMessageBox(*this,
          XO("Selection must be larger than %d samples.")
             .Format(windowSize / 2),
          wxOK | wxICON_ERROR );
       return false;
    }
 
-   auto idealBlockLen = track->GetMaxBlockSize() * 4;
+   auto idealBlockLen = track.GetMaxBlockSize() * 4;
    if (idealBlockLen % windowSize != 0)
       idealBlockLen += (windowSize - (idealBlockLen % windowSize));
 
@@ -229,39 +166,35 @@ bool EffectClickRemoval::ProcessOne(int count, WaveTrack * track, sampleCount st
    decltype(len) s = 0;
    Floats buffer{ idealBlockLen };
    Floats datawindow{ windowSize };
-   while ((len - s) > windowSize / 2)
-   {
-      auto block = limitSampleBufferSize( idealBlockLen, len - s );
-
-      track->Get((samplePtr) buffer.get(), floatSample, start + s, block);
-
-      for (decltype(block) i = 0; i + windowSize / 2 < block; i += windowSize / 2)
-      {
-         auto wcopy = std::min( windowSize, block - i );
-
-         for(decltype(wcopy) j = 0; j < wcopy; j++)
-            datawindow[j] = buffer[i+j];
-         for(auto j = wcopy; j < windowSize; j++)
+   while ((len - s) > windowSize / 2) {
+      auto block = limitSampleBufferSize(idealBlockLen, len - s);
+      track.GetFloats(buffer.get(), start + s, block);
+      for (decltype(block) i = 0;
+           i + windowSize / 2 < block; i += windowSize / 2
+      ) {
+         auto wcopy = std::min(windowSize, block - i);
+         for (decltype(wcopy) j = 0; j < wcopy; ++j)
+            datawindow[j] = buffer[i + j];
+         for (auto j = wcopy; j < windowSize; ++j)
             datawindow[j] = 0;
-
          mbDidSomething |= RemoveClicks(windowSize, datawindow.get());
-
-         for(decltype(wcopy) j = 0; j < wcopy; j++)
+         for (decltype(wcopy) j = 0; j < wcopy; ++j)
            buffer[i+j] = datawindow[j];
       }
 
-      if (mbDidSomething) // RemoveClicks() actually did something.
-         track->Set((samplePtr) buffer.get(), floatSample, start + s, block);
-
+      if (mbDidSomething) {
+         // RemoveClicks() actually did something.
+         if(!track.SetFloats(buffer.get(), start + s, block)) {
+            bResult = false;
+            break;
+         }
+      }
       s += block;
-
-      if (TrackProgress(count, s.as_double() /
-                               len.as_double())) {
+      if (TrackProgress(count, s.as_double() / len.as_double())) {
          bResult = false;
          break;
       }
    }
-
    return bResult;
 }
 
@@ -335,8 +268,11 @@ bool EffectClickRemoval::RemoveClicks(size_t len, float *buffer)
    return bResult;
 }
 
-void EffectClickRemoval::PopulateOrExchange(ShuttleGui & S)
+std::unique_ptr<EffectEditor> EffectClickRemoval::PopulateOrExchange(
+   ShuttleGui & S, EffectInstance &, EffectSettingsAccess &,
+   const EffectOutputs *)
 {
+   mUIParent = S.GetParent();
    S.AddSpace(0, 5);
    S.SetBorder(10);
 
@@ -347,8 +283,7 @@ void EffectClickRemoval::PopulateOrExchange(ShuttleGui & S)
       mThreshT = S.Id(ID_Thresh)
          .Validator<IntegerValidator<int>>(
             &mThresholdLevel, NumValidatorStyle::DEFAULT,
-            MIN_Threshold, MAX_Threshold
-         )
+            Threshold.min, Threshold.max )
          .AddTextBox(XXO("&Threshold (lower is more sensitive):"),
                      wxT(""),
                      10);
@@ -358,12 +293,12 @@ void EffectClickRemoval::PopulateOrExchange(ShuttleGui & S)
          .Style(wxSL_HORIZONTAL)
          .Validator<wxGenericValidator>(&mThresholdLevel)
          .MinSize( { 150, -1 } )
-         .AddSlider( {}, mThresholdLevel, MAX_Threshold, MIN_Threshold);
+         .AddSlider( {}, mThresholdLevel, Threshold.max, Threshold.min);
 
       // Click width
       mWidthT = S.Id(ID_Width)
          .Validator<IntegerValidator<int>>(
-            &mClickWidth, NumValidatorStyle::DEFAULT, MIN_Width, MAX_Width)
+            &mClickWidth, NumValidatorStyle::DEFAULT, Width.min, Width.max)
          .AddTextBox(XXO("Max &Spike Width (higher is more sensitive):"),
                      wxT(""),
                      10);
@@ -373,14 +308,14 @@ void EffectClickRemoval::PopulateOrExchange(ShuttleGui & S)
          .Style(wxSL_HORIZONTAL)
          .Validator<wxGenericValidator>(&mClickWidth)
          .MinSize( { 150, -1 } )
-         .AddSlider( {}, mClickWidth, MAX_Width, MIN_Width);
+         .AddSlider( {}, mClickWidth, Width.max, Width.min);
    }
    S.EndMultiColumn();
 
-   return;
+   return nullptr;
 }
 
-bool EffectClickRemoval::TransferDataToWindow()
+bool EffectClickRemoval::TransferDataToWindow(const EffectSettings &)
 {
    if (!mUIParent->TransferDataToWindow())
    {
@@ -390,7 +325,7 @@ bool EffectClickRemoval::TransferDataToWindow()
    return true;
 }
 
-bool EffectClickRemoval::TransferDataFromWindow()
+bool EffectClickRemoval::TransferDataFromWindow(EffectSettings &)
 {
    if (!mUIParent->Validate() || !mUIParent->TransferDataFromWindow())
    {

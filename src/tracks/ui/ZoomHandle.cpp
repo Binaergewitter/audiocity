@@ -8,7 +8,7 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../Audacity.h"
+
 #include "ZoomHandle.h"
 
 #include <algorithm>
@@ -22,7 +22,7 @@ Paul Licameli split from TrackPanel.cpp
 #include "../../TrackArtist.h"
 #include "../../TrackPanelDrawingContext.h"
 #include "../../TrackPanelMouseEvent.h"
-#include "../../ViewInfo.h"
+#include "ViewInfo.h"
 #include "../../../images/Cursors.h"
 
 ///  This class takes care of our different zoom
@@ -81,6 +81,16 @@ UIHandlePtr ZoomHandle::HitTest
 
 ZoomHandle::~ZoomHandle()
 {
+}
+
+std::shared_ptr<const Track> ZoomHandle::FindTrack() const
+{
+   return nullptr;
+}
+
+bool ZoomHandle::HandlesRightClick()
+{
+   return true;
 }
 
 UIHandle::Result ZoomHandle::Click
@@ -148,7 +158,7 @@ UIHandle::Result ZoomHandle::Release
 
       viewInfo.ZoomBy(multiplier);
 
-      viewInfo.h = left;
+      viewInfo.hpos = left;
    }
    else
    {
@@ -169,7 +179,7 @@ UIHandle::Result ZoomHandle::Release
       const double new_center_h =
          viewInfo.PositionToTime(event.m_x, trackLeftEdge);
 
-      viewInfo.h += (center_h - new_center_h);
+      viewInfo.hpos += (center_h - new_center_h);
    }
 
    mZoomEnd = mZoomStart = 0;

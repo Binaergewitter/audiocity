@@ -2,23 +2,23 @@ $nyquist plug-in
 $version 4
 $type process spectral
 $preview linear
-$name (_ "Spectral edit parametric EQ")
-$manpage "Spectral_edit_parametric_EQ"
-$action (_ "Filtering...")
+$name (_ "Spectral Edit Parametric EQ")
+$debugbutton false
 $author (_ "Paul Licameli")
-$release 2.3.0
-$copyright (_ "Released under terms of the GNU General Public License version 2")
+$release 2.3.0-2
+$copyright (_ "GNU General Public License v2.0")
 
-;; SpectralEditParametricEQ.ny by Paul Licameli, November 2014.
-;; Updated by Steve Daulton 2014 / 2015.
-
-;; Released under terms of the GNU General Public License version 2:
+;; License: GPL v2
 ;; http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 ;;
 ;; For information about writing and modifying Nyquist plug-ins:
 ;; https://wiki.audacityteam.org/wiki/Nyquist_Plug-ins_Reference
 
-$control control-gain (_ "Gain (dB)") real "" 0 -24 24
+;; SpectralEditParametricEQ.ny by Paul Licameli, November 2014.
+;; Updated by Steve Daulton 2014 / 2015.
+
+
+$control CONTROL-GAIN (_ "Gain (dB)") real "" 0 -24 24
 
 (defun wet (sig gain fc bw)
   (eq-band sig fc gain (/ bw 2)))
@@ -60,11 +60,11 @@ $control control-gain (_ "Gain (dB)") real "" 0 -24 24
       ;; If centre frequency band is above Nyquist, do nothing.
       ((and fc (>= fc (/ *sound-srate* 2.0)))
           nil)
-      (t  (sum (prod env (wet sig control-gain fc bw))
+      (t  (sum (prod env (wet sig CONTROL-GAIN fc bw))
                (prod (diff 1.0 env) sig))))))
 
 (catch 'error-message
   (setf p-err (format nil (_ "Error.~%")))
-  (if (= control-gain 0)
-      nil ; Do nothing
+  (if (= CONTROL-GAIN 0)
+      "" ; No-op
       (multichan-expand #'result *track*)))

@@ -9,25 +9,20 @@ Max Maisel
 ***********************************************************************/
 
 #include "EBUR128.h"
+#include <cstring>
 
 EBUR128::EBUR128(double rate, size_t channels)
-   : mChannelCount(channels)
-   , mRate(rate)
+   : mChannelCount{ channels }
+   , mRate{ rate }
+   , mBlockSize( ceil(0.4 * mRate) ) // 400 ms blocks
+   , mBlockOverlap( ceil(0.1 * mRate) ) // 100 ms overlap
 {
-   mBlockSize = ceil(0.4 * mRate); // 400 ms blocks
-   mBlockOverlap = ceil(0.1 * mRate); // 100 ms overlap
    mLoudnessHist.reinit(HIST_BIN_COUNT, false);
    mBlockRingBuffer.reinit(mBlockSize);
    mWeightingFilter.reinit(mChannelCount, false);
    for(size_t channel = 0; channel < mChannelCount; ++channel)
       mWeightingFilter[channel] = CalcWeightingFilter(mRate);
-}
 
-void EBUR128::Initialize()
-{
-   mSampleCount = 0;
-   mBlockRingPos = 0;
-   mBlockRingSize = 0;
    memset(mLoudnessHist.get(), 0, HIST_BIN_COUNT*sizeof(long int));
    for(size_t channel = 0; channel < mChannelCount; ++channel)
    {
@@ -82,10 +77,10 @@ ArrayOf<Biquad> EBUR128::CalcWeightingFilter(double fs)
    pBiquad[1].fDenomCoeffs[Biquad::A1] = 2.0 * (K * K - 1.0) / (1.0 + K / Q + K * K);
    pBiquad[1].fDenomCoeffs[Biquad::A2] = (1.0 - K / Q + K * K) / (1.0 + K / Q + K * K);
 
-   return std::move(pBiquad);
+   return pBiquad;
 }
 
-void EBUR128::ProcessSampleFromChannel(float x_in, size_t channel)
+void EBUR128::ProcessSampleFromChannel(float x_in, size_t channel) const
 {
    double value;
    value = mWeightingFilter[channel][0].ProcessOne(x_in);
@@ -150,7 +145,8 @@ double EBUR128::IntegrativeLoudness()
    return 0.8529037031 * sum_v / sum_c;
 }
 
-void EBUR128::HistogramSums(size_t start_idx, double& sum_v, long int& sum_c)
+void
+EBUR128::HistogramSums(size_t start_idx, double& sum_v, long int& sum_c) const
 {
     double val;
     sum_v = 0;

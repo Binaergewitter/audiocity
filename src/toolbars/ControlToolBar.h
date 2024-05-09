@@ -29,9 +29,10 @@ class AButton;
 class AudacityProject;
 
 // In the GUI, ControlToolBar appears as the "Transport Toolbar". "Control Toolbar" is historic.
-class ControlToolBar final : public ToolBar {
+class AUDACITY_DLL_API ControlToolBar final : public ToolBar {
 
  public:
+   static Identifier ID();
 
    ControlToolBar( AudacityProject &project );
    virtual ~ControlToolBar();
@@ -53,6 +54,7 @@ class ControlToolBar final : public ToolBar {
    void OnRecord(wxCommandEvent & evt);
    void OnFF(wxCommandEvent & evt);
    void OnPause(wxCommandEvent & evt);
+   void OnLoop(wxCommandEvent & evt);
    void OnIdle(wxIdleEvent & event);
 
    // Choice among the appearances of the play button:
@@ -83,13 +85,6 @@ class ControlToolBar final : public ToolBar {
  private:
    void UpdateStatusBar();
 
-   static AButton *MakeButton(
-      ControlToolBar *pBar,
-      teBmps eEnabledUp, teBmps eEnabledDown, teBmps eDisabled,
-      int id,
-      bool processdownevents,
-      const TranslatableString &label);
-
    static
    void MakeAlternateImages(AButton &button, int idx,
                             teBmps eEnabledUp,
@@ -107,6 +102,7 @@ class ControlToolBar final : public ToolBar {
       ID_FF_BUTTON,
       ID_REW_BUTTON,
       ID_RECORD_BUTTON,
+      ID_LOOP_BUTTON,
       BUTTON_COUNT,
    };
 
@@ -116,9 +112,7 @@ class ControlToolBar final : public ToolBar {
    AButton *mPause;
    AButton *mStop;
    AButton *mFF;
-
-   // Activate ergonomic order for transport buttons
-   bool mErgonomicTransportButtons;
+   AButton *mLoop;
 
    wxString mStrLocale; // standard locale abbreviation
 

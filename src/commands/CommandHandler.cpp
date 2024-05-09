@@ -16,16 +16,16 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "CommandHandler.h"
 
-#include <wx/event.h>
-#include "../Project.h"
-#include "../ProjectWindow.h"
+#include "../ActiveProject.h"
+#include "Project.h"
 #include "AppCommandEvent.h"
 #include "ScriptCommandRelay.h"
-#include "../commands/CommandContext.h"
+#include "CommandContext.h"
 #include "../commands/Command.h"
+#include "Viewport.h"
 
 CommandHandler::CommandHandler()
 {
@@ -40,7 +40,7 @@ void CommandHandler::OnReceiveCommand(AppCommandEvent &event)
    // First retrieve the actual command from the event 'envelope'.
    OldStyleCommandPointer cmd = event.GetCommand();
 
-   if (const auto pProject = GetActiveProject()) {
+   if (const auto pProject = GetActiveProject().lock()) {
       // Then apply it to current application & project.  Note that the
       // command may change the context - for example, switching to a
       // different project.
@@ -51,6 +51,6 @@ void CommandHandler::OnReceiveCommand(AppCommandEvent &event)
       wxUnusedVar(result);
 
       // Redraw the project
-      ProjectWindow::Get( context.project ).RedrawProject();
+      Viewport::Get(context.project).Redraw();
    }
 }

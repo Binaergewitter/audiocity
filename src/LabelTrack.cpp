@@ -28,56 +28,93 @@ for drawing different aspects of the label and its text box.
 
 *//*******************************************************************/
 
-#include "Audacity.h" // for HAVE_GTK
+
 #include "LabelTrack.h"
 
-#include "tracks/ui/TrackView.h"
-#include "tracks/ui/TrackControls.h"
-
-
-
-#include <stdio.h>
 #include <algorithm>
 #include <limits.h>
 #include <float.h>
 
+#include <wx/log.h>
 #include <wx/tokenzr.h>
+#include <wx/datetime.h>
 
 #include "Prefs.h"
-#include "ProjectFileIORegistry.h"
+#include "Project.h"
 #include "prefs/ImportExportPrefs.h"
 
-#include "effects/TimeWarper.h"
-#include "widgets/AudacityMessageBox.h"
+#include "TimeWarper.h"
+#include "AudacityMessageBox.h"
 
-wxDEFINE_EVENT(EVT_LABELTRACK_ADDITION, LabelTrackEvent);
-wxDEFINE_EVENT(EVT_LABELTRACK_DELETION, LabelTrackEvent);
-wxDEFINE_EVENT(EVT_LABELTRACK_PERMUTED, LabelTrackEvent);
-wxDEFINE_EVENT(EVT_LABELTRACK_SELECTION, LabelTrackEvent);
+const FileNames::FileType LabelTrack::SubripFiles{ XO("SubRip text file"), { wxT("srt") }, true };
+const FileNames::FileType LabelTrack::WebVTTFiles{ XO("WebVTT file"), { wxT("vtt") }, true };
 
-static ProjectFileIORegistry::Entry registerFactory{
-   wxT( "labeltrack" ),
-   []( AudacityProject &project ){
-      auto &tracks = TrackList::Get( project );
-      auto result = tracks.Add(std::make_shared<LabelTrack>());
-      TrackView::Get( *result );
-      TrackControls::Get( *result );
-      return result;
-   }
-};
+LabelTrack::Interval::~Interval() = default;
 
-LabelTrack::LabelTrack():
-   Track(),
-   mClipLen(0.0),
-   miLastLabel(-1)
+double LabelTrack::Interval::Start() const
 {
-   SetDefaultName(_("Label Track"));
-   SetName(GetDefaultName());
+   return mpTrack->GetLabel(index)->selectedRegion.t0();
 }
 
-LabelTrack::LabelTrack(const LabelTrack &orig) :
-   Track(orig),
-   mClipLen(0.0)
+double LabelTrack::Interval::End() const
+{
+   return mpTrack->GetLabel(index)->selectedRegion.t1();
+}
+
+size_t LabelTrack::Interval::NChannels() const
+{
+   return 1;
+}
+
+std::shared_ptr<ChannelInterval>
+LabelTrack::Interval::DoGetChannel(size_t iChannel)
+{
+   if (iChannel == 0)
+      return std::make_shared<ChannelInterval>();
+   return {};
+}
+
+static ProjectFileIORegistry::ObjectReaderEntry readerEntry{
+   "labeltrack",
+   LabelTrack::New
+};
+
+wxString LabelTrack::GetDefaultName()
+{
+   return _("Labels");
+}
+
+LabelTrack *LabelTrack::New( AudacityProject &project )
+{
+   auto &tracks = TrackList::Get( project );
+   auto result = tracks.Add(std::make_shared<LabelTrack>());
+   result->AttachedTrackObjects::BuildAll();
+   return result;
+}
+
+LabelTrack* LabelTrack::Create(TrackList& trackList, const wxString& name)
+{
+   auto track = std::make_shared<LabelTrack>();
+   track->SetName(name);
+   trackList.Add(track);
+   return track.get();
+}
+
+LabelTrack* LabelTrack::Create(TrackList& trackList)
+{
+   return Create(trackList, trackList.MakeUniqueTrackName(GetDefaultName()));
+}
+
+LabelTrack::LabelTrack()
+   : UniqueChannelTrack{}
+   , mClipLen{ 0.0 }
+   , miLastLabel{ -1 }
+{
+}
+
+LabelTrack::LabelTrack(const LabelTrack &orig, ProtectedCreationArg &&a)
+   : UniqueChannelTrack{ orig, std::move(a) }
+   , mClipLen{ 0.0 }
 {
    for (auto &original: orig.mLabels) {
       LabelStruct l { original.selectedRegion, original.title };
@@ -85,48 +122,48 @@ LabelTrack::LabelTrack(const LabelTrack &orig) :
    }
 }
 
-Track::Holder LabelTrack::PasteInto( AudacityProject & ) const
+static const Track::TypeInfo &typeInfo()
+{
+   static Track::TypeInfo info{
+      { "label", "label", XO("Label Track") }, true, &Track::ClassTypeInfo() };
+   return info;
+}
+
+auto LabelTrack::GetTypeInfo() const -> const TypeInfo &
+{
+   return typeInfo();
+}
+
+auto LabelTrack::ClassTypeInfo() -> const TypeInfo &
+{
+   return typeInfo();
+}
+
+Track::Holder LabelTrack::PasteInto(AudacityProject &, TrackList &list) const
 {
    auto pNewTrack = std::make_shared<LabelTrack>();
-   pNewTrack->Paste(0.0, this);
+   pNewTrack->Init(*this);
+   pNewTrack->Paste(0.0, *this);
+   list.Add(pNewTrack);
    return pNewTrack;
 }
 
-template<typename IntervalType>
-static IntervalType DoMakeInterval(const LabelStruct &label, size_t index)
+size_t LabelTrack::NIntervals() const
 {
-   return {
-      label.getT0(), label.getT1(),
-      std::make_unique<LabelTrack::IntervalData>( index ) };
+   return mLabels.size();
 }
 
-auto LabelTrack::MakeInterval( size_t index ) const -> ConstInterval
+auto LabelTrack::MakeInterval(size_t index) -> std::shared_ptr<Interval>
 {
-   return DoMakeInterval<ConstInterval>(mLabels[index], index);
+   if (index >= mLabels.size())
+      return {};
+   return std::make_shared<Interval>(*this, index);
 }
 
-auto LabelTrack::MakeInterval( size_t index ) -> Interval
+std::shared_ptr<WideChannelGroupInterval>
+LabelTrack::DoGetInterval(size_t iInterval)
 {
-   return DoMakeInterval<Interval>(mLabels[index], index);
-}
-
-template< typename Container, typename LabelTrack >
-static Container DoMakeIntervals(LabelTrack &track)
-{
-   Container result;
-   for (size_t ii = 0, nn = track.GetNumLabels(); ii < nn; ++ii)
-      result.emplace_back( track.MakeInterval( ii ) );
-   return result;
-}
-
-auto LabelTrack::GetIntervals() const -> ConstIntervals
-{
-   return DoMakeIntervals<ConstIntervals>(*this);
-}
-
-auto LabelTrack::GetIntervals() -> Intervals
-{
-   return DoMakeIntervals<Intervals>(*this);
+   return MakeInterval(iInterval);
 }
 
 void LabelTrack::SetLabel( size_t iLabel, const LabelStruct &newLabel )
@@ -142,10 +179,14 @@ LabelTrack::~LabelTrack()
 {
 }
 
-void LabelTrack::SetOffset(double dOffset)
+void LabelTrack::MoveTo(double origin)
 {
-   for (auto &labelStruct: mLabels)
-      labelStruct.selectedRegion.move(dOffset);
+   if (!mLabels.empty()) {
+      const auto offset = origin - mLabels[0].selectedRegion.t0();
+      for (auto &labelStruct: mLabels) {
+         labelStruct.selectedRegion.move(offset);
+      }
+   }
 }
 
 void LabelTrack::Clear(double b, double e)
@@ -299,46 +340,16 @@ void LabelTrack::SetSelected( bool s )
 {
    bool selected = GetSelected();
    Track::SetSelected( s );
-   if ( selected != GetSelected() ) {
-      LabelTrackEvent evt{
-         EVT_LABELTRACK_SELECTION, SharedPointer<LabelTrack>(), {}, -1, -1
-      };
-      ProcessEvent( evt );
-   }
+   if ( selected != GetSelected() )
+      Publish({ LabelTrackEvent::Selection,
+         this->SharedPointer<LabelTrack>(), {}, -1, -1 });
 }
 
-double LabelTrack::GetOffset() const
+Track::Holder LabelTrack::Clone(bool) const
 {
-   return mOffset;
-}
-
-double LabelTrack::GetStartTime() const
-{
-   if (mLabels.empty())
-      return 0.0;
-   else
-      return mLabels[0].getT0();
-}
-
-double LabelTrack::GetEndTime() const
-{
-   //we need to scan through all the labels, because the last
-   //label might not have the right-most end (if there is overlap).
-   if (mLabels.empty())
-      return 0.0;
-
-   double end = 0.0;
-   for (auto &labelStruct: mLabels) {
-      const double t1 = labelStruct.getT1();
-      if(t1 > end)
-         end = t1;
-   }
-   return end;
-}
-
-Track::Holder LabelTrack::Clone() const
-{
-   return std::make_shared<LabelTrack>( *this );
+   auto result = std::make_shared<LabelTrack>(*this, ProtectedCreationArg{});
+   result->Init(*this);
+   return result;
 }
 
 // Adjust label's left or right boundary, depending which is requested.
@@ -368,102 +379,246 @@ void LabelStruct::MoveLabel( int iEdge, double fNewTime)
    updated = true;
 }
 
-LabelStruct LabelStruct::Import(wxTextFile &file, int &index)
+
+#include "ShuttleGui.h"
+namespace {
+
+static EnumSetting<bool> LabelStyleSetting{
+   wxT("/FileFormats/LabelStyleChoice"),
+   {
+      EnumValueSymbol{ wxT("Standard"), XXO("S&tandard") },
+      EnumValueSymbol{ wxT("Extended"), XXO("E&xtended (with frequency ranges)") },
+   },
+   0, // true
+
+   {
+      true, false,
+   },
+};
+
+void AddControls(ShuttleGui &S)
+{
+   S.StartStatic(XO("Exported Label Style:"));
+   {
+#if defined(__WXMAC__)
+      // Bug 2692: Place button group in panel so tabbing will work and,
+      // on the Mac, VoiceOver will announce as radio buttons.
+      S.StartPanel();
+#endif
+      {
+         S.StartRadioButtonGroup(LabelStyleSetting);
+         {
+            S.TieRadioButton();
+            S.TieRadioButton();
+         }
+         S.EndRadioButtonGroup();
+      }
+#if defined(__WXMAC__)
+      S.EndPanel();
+#endif
+   }
+   S.EndStatic();
+}
+
+ImportExportPrefs::RegisteredControls reg{ wxT("LabelStyle"), AddControls };
+
+}
+
+static double SubRipTimestampToDouble(const wxString &ts)
+{
+   wxString::const_iterator end;
+   wxDateTime dt;
+
+   if (!dt.ParseFormat(ts, wxT("%H:%M:%S,%l"), &end) || end != ts.end())
+      throw LabelStruct::BadFormatException{};
+
+   return dt.GetHour() * 3600 + dt.GetMinute() * 60 + dt.GetSecond()
+      + dt.GetMillisecond() / 1000.0;
+}
+
+LabelStruct LabelStruct::Import(wxTextFile &file, int &index, LabelFormat format)
 {
    SelectedRegion sr;
    wxString title;
-   static const wxString continuation{ wxT("\\") };
 
    wxString firstLine = file.GetLine(index++);
 
+   switch (format) {
+   case LabelFormat::TEXT:
    {
-      // Assume tab is an impossible character within the exported text
-      // of the label, so can be only a delimiter.  But other white space may
-      // be part of the label text.
-      wxStringTokenizer toker { firstLine, wxT("\t") };
+      static const wxString continuation{ wxT("\\") };
 
-      //get the timepoint of the left edge of the label.
-      auto token = toker.GetNextToken();
+      {
+         // Assume tab is an impossible character within the exported text
+         // of the label, so can be only a delimiter.  But other white space may
+         // be part of the label text.
+         wxStringTokenizer toker { firstLine, wxT("\t") };
 
-      double t0;
-      if (!Internat::CompatibleToDouble(token, &t0))
-         throw BadFormatException{};
+         //get the timepoint of the left edge of the label.
+         auto token = toker.GetNextToken();
 
-      token = toker.GetNextToken();
+         double t0;
+         if (!Internat::CompatibleToDouble(token, &t0))
+            throw BadFormatException{};
 
-      double t1;
-      if (!Internat::CompatibleToDouble(token, &t1))
-         //s1 is not a number.
-         t1 = t0;  //This is a one-sided label; t1 == t0.
-      else
          token = toker.GetNextToken();
 
-      sr.setTimes( t0, t1 );
-      
-      title = token;
+         double t1;
+         if (!Internat::CompatibleToDouble(token, &t1))
+            //s1 is not a number.
+            t1 = t0;  //This is a one-sided label; t1 == t0.
+         else
+            token = toker.GetNextToken();
+
+         sr.setTimes( t0, t1 );
+
+         title = token;
+      }
+
+      // Newer selection fields are written on additional lines beginning with
+      // '\' which is an impossible numerical character that older versions of
+      // audacity will ignore.  Test for the presence of such a line and then
+      // parse it if we can.
+
+      // There may also be additional continuation lines from future formats that
+      // we ignore.
+
+      // Advance index over all continuation lines first, before we might throw
+      // any exceptions.
+      int index2 = index;
+      while (index < (int)file.GetLineCount() &&
+             file.GetLine(index).StartsWith(continuation))
+         ++index;
+
+      if (index2 < index) {
+         wxStringTokenizer toker { file.GetLine(index2++), wxT("\t") };
+         auto token = toker.GetNextToken();
+         if (token != continuation)
+            throw BadFormatException{};
+
+         token = toker.GetNextToken();
+         double f0;
+         if (!Internat::CompatibleToDouble(token, &f0))
+            throw BadFormatException{};
+
+         token = toker.GetNextToken();
+         double f1;
+         if (!Internat::CompatibleToDouble(token, &f1))
+            throw BadFormatException{};
+
+         sr.setFrequencies(f0, f1);
+      }
+      break;
    }
-
-   // Newer selection fields are written on additional lines beginning with
-   // '\' which is an impossible numerical character that older versions of
-   // audacity will ignore.  Test for the presence of such a line and then
-   // parse it if we can.
-
-   // There may also be additional continuation lines from future formats that
-   // we ignore.
-
-   // Advance index over all continuation lines first, before we might throw
-   // any exceptions.
-   int index2 = index;
-   while (index < (int)file.GetLineCount() &&
-          file.GetLine(index).StartsWith(continuation))
-      ++index;
-
-   if (index2 < index) {
-      wxStringTokenizer toker { file.GetLine(index2++), wxT("\t") };
-      auto token = toker.GetNextToken();
-      if (token != continuation)
+   case LabelFormat::SUBRIP:
+   {
+      if ((int)file.GetLineCount() < index + 2)
          throw BadFormatException{};
 
-      token = toker.GetNextToken();
-      double f0;
-      if (!Internat::CompatibleToDouble(token, &f0))
+      long identifier;
+      // The first line should be a numeric counter; we can ignore it otherwise
+      if (!firstLine.ToLong(&identifier))
          throw BadFormatException{};
 
-      token = toker.GetNextToken();
-      double f1;
-      if (!Internat::CompatibleToDouble(token, &f1))
+      wxString timestamp = file.GetLine(index++);
+      // Parsing data of the form 'HH:MM:SS,sss --> HH:MM:SS,sss'
+      // Assume that the line is in exactly that format, with no extra whitespace
+      // and less than 24 hours.
+      if (timestamp.length() != 29)
+         throw BadFormatException{};
+      if (!timestamp.substr(12, 5).IsSameAs(" --> "))
          throw BadFormatException{};
 
-      sr.setFrequencies(f0, f1);
+      double t0 = SubRipTimestampToDouble(timestamp.substr(0, 12));
+      double t1 = SubRipTimestampToDouble(timestamp.substr(17, 12));
+
+      sr.setTimes(t0, t1);
+
+      // Assume that if there is an empty subtitle, there still is a second
+      // blank line after it
+      title = file[index++];
+
+      // Labels in audacity should be only one line, so join multiple lines
+      // with spaces.  This is not reversed on export.
+      while (index < (int)file.GetLineCount() &&
+             !file.GetLine(index).IsEmpty())
+         title += " " + file.GetLine(index);
+
+      index++; // Skip over empty line
+
+      break;
+   }
+   default:
+      throw BadFormatException{};
    }
 
    return LabelStruct{ sr, title };
 }
 
-void LabelStruct::Export(wxTextFile &file) const
+static wxString SubRipTimestampFromDouble(double timestamp, bool webvtt)
 {
-   file.AddLine(wxString::Format(wxT("%s\t%s\t%s"),
-      Internat::ToString(getT0(), FLT_DIG),
-      Internat::ToString(getT1(), FLT_DIG),
-      title
-   ));
+   // Note that the SubRip format always uses the comma as its separator...
+   static constexpr auto subripFormat = wxT("%H:%M:%S,%l");
+   // ... while WebVTT always used the period.
+   // WebVTT also allows skipping the hour part, but doesn't require doing so.
+   static constexpr auto webvttFormat = wxT("%H:%M:%S.%l");
+
+   // dt is the datetime that is timestamp seconds after Jan 1, 1970 UTC.
+   wxDateTime dt { (time_t) timestamp };
+   dt.SetMillisecond(wxRound(timestamp * 1000) % 1000);
+
+   // As such, we need to use UTC when formatting it, or else the time will
+   // be shifted (assuming the user is not in the UTC timezone).
+   return dt.Format(webvtt ? webvttFormat : subripFormat, wxDateTime::UTC);
+}
+
+void LabelStruct::Export(wxTextFile &file, LabelFormat format, int index) const
+{
+   switch (format) {
+   case LabelFormat::TEXT:
+   default:
+   {
+      file.AddLine(wxString::Format(wxT("%s\t%s\t%s"),
+         Internat::ToString(getT0(), FLT_DIG),
+         Internat::ToString(getT1(), FLT_DIG),
+         title
+      ));
 
    // Do we need more lines?
    auto f0 = selectedRegion.f0();
    auto f1 = selectedRegion.f1();
    if ((f0 == SelectedRegion::UndefinedFrequency &&
       f1 == SelectedRegion::UndefinedFrequency) ||
-      ImportExportPrefs::LabelStyleSetting.ReadEnum())
+      LabelStyleSetting.ReadEnum())
       return;
 
-   // Write a \ character at the start of a second line,
-   // so that earlier versions of Audacity ignore it.
-   file.AddLine(wxString::Format(wxT("\\\t%s\t%s"),
-      Internat::ToString(f0, FLT_DIG),
-      Internat::ToString(f1, FLT_DIG)
-   ));
+      // Write a \ character at the start of a second line,
+      // so that earlier versions of Audacity ignore it.
+      file.AddLine(wxString::Format(wxT("\\\t%s\t%s"),
+         Internat::ToString(f0, FLT_DIG),
+         Internat::ToString(f1, FLT_DIG)
+      ));
 
-   // Additional lines in future formats should also start with '\'.
+      // Additional lines in future formats should also start with '\'.
+      break;
+   }
+   case LabelFormat::SUBRIP:
+   case LabelFormat::WEBVTT:
+   {
+      // Note that the identifier is optional in WebVTT, but required in SubRip.
+      // We include it for both.
+      file.AddLine(wxString::Format(wxT("%d"), index + 1));
+
+      file.AddLine(wxString::Format(wxT("%s --> %s"),
+         SubRipTimestampFromDouble(getT0(), format == LabelFormat::WEBVTT),
+         SubRipTimestampFromDouble(getT1(), format == LabelFormat::WEBVTT)));
+
+      file.AddLine(title);
+      file.AddLine(wxT(""));
+
+      break;
+   }
+   }
 }
 
 auto LabelStruct::RegionRelation(
@@ -533,16 +688,38 @@ auto LabelStruct::RegionRelation(
 }
 
 /// Export labels including label start and end-times.
-void LabelTrack::Export(wxTextFile & f) const
+void LabelTrack::Export(wxTextFile & f, LabelFormat format) const
 {
+   if (format == LabelFormat::WEBVTT) {
+      f.AddLine(wxT("WEBVTT"));
+      f.AddLine(wxT(""));
+   }
+
    // PRL: to do: export other selection fields
+   int index = 0;
    for (auto &labelStruct: mLabels)
-      labelStruct.Export(f);
+      labelStruct.Export(f, format, index++);
+}
+
+LabelFormat LabelTrack::FormatForFileName(const wxString & fileName)
+{
+   LabelFormat format = LabelFormat::TEXT;
+   if (fileName.Right(4).CmpNoCase(wxT(".srt")) == 0) {
+      format = LabelFormat::SUBRIP;
+   } else if (fileName.Right(4).CmpNoCase(wxT(".vtt")) == 0) {
+      format = LabelFormat::WEBVTT;
+   }
+   return format;
 }
 
 /// Import labels, handling files with or without end-times.
-void LabelTrack::Import(wxTextFile & in)
+void LabelTrack::Import(wxTextFile & in, LabelFormat format)
 {
+   if (format == LabelFormat::WEBVTT) {
+      ::AudacityMessageBox( XO("Importing WebVTT files is not currently supported.") );
+      return;
+   }
+
    int lines = in.GetLineCount();
 
    mLabels.clear();
@@ -555,7 +732,7 @@ void LabelTrack::Import(wxTextFile & in)
    for (int index = 0; index < lines;) {
       try {
          // Let LabelStruct::Import advance index
-         LabelStruct l { LabelStruct::Import(in, index) };
+         LabelStruct l { LabelStruct::Import(in, index, format) };
          mLabels.push_back(l);
       }
       catch(const LabelStruct::BadFormatException&) { error = true; }
@@ -565,33 +742,25 @@ void LabelTrack::Import(wxTextFile & in)
    SortLabels();
 }
 
-bool LabelTrack::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
+bool LabelTrack::HandleXMLTag(const std::string_view& tag, const AttributesList &attrs)
 {
-   if (!wxStrcmp(tag, wxT("label"))) {
+   if (tag == "label") {
 
       SelectedRegion selectedRegion;
       wxString title;
 
       // loop through attrs, which is a null-terminated list of
       // attribute-value pairs
-      while(*attrs) {
-         const wxChar *attr = *attrs++;
-         const wxChar *value = *attrs++;
+      for (auto pair : attrs)
+      {
+         auto attr = pair.first;
+         auto value = pair.second;
 
-         if (!value)
-            break;
-
-         const wxString strValue = value;
-         // Bug 1905 was about long label strings.
-         if (!XMLValueChecker::IsGoodLongString(strValue))
-         {
-            return false;
-         }
-
-         if (selectedRegion.HandleXMLAttribute(attr, value, wxT("t"), wxT("t1")))
+         if (selectedRegion.HandleXMLAttribute(attr, value, "t", "t1"))
             ;
-         else if (!wxStrcmp(attr, wxT("title")))
-            title = strValue;
+         // Bug 1905 no longer applies, as valueView has no limits anyway
+         else if (attr == "title")
+            title = value.ToWString();
 
       } // while
 
@@ -607,20 +776,16 @@ bool LabelTrack::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
 
       return true;
    }
-   else if (!wxStrcmp(tag, wxT("labeltrack"))) {
+   else if (tag == "labeltrack") {
       long nValue = -1;
-      while (*attrs) {
-         const wxChar *attr = *attrs++;
-         const wxChar *value = *attrs++;
+      for (auto pair : attrs)
+      {
+         auto attr = pair.first;
+         auto value = pair.second;
 
-         if (!value)
-            return true;
-
-         const wxString strValue = value;
-         if (this->Track::HandleCommonXMLAttribute(attr, strValue))
+         if (this->Track::HandleCommonXMLAttribute(attr, value))
             ;
-         else if (!wxStrcmp(attr, wxT("numlabels")) &&
-                     XMLValueChecker::IsGoodInt(strValue) && strValue.ToLong(&nValue))
+         else if (attr == "numlabels" && value.TryGet(nValue))
          {
             if (nValue < 0)
             {
@@ -638,9 +803,9 @@ bool LabelTrack::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
    return false;
 }
 
-XMLTagHandler *LabelTrack::HandleXMLChild(const wxChar *tag)
+XMLTagHandler *LabelTrack::HandleXMLChild(const std::string_view& tag)
 {
-   if (!wxStrcmp(tag, wxT("label")))
+   if (tag == "label")
       return this;
    else
       return NULL;
@@ -658,7 +823,7 @@ void LabelTrack::WriteXML(XMLWriter &xmlFile) const
    for (auto &labelStruct: mLabels) {
       xmlFile.StartTag(wxT("label"));
       labelStruct.getSelectedRegion()
-         .WriteXMLAttributes(xmlFile, wxT("t"), wxT("t1"));
+         .WriteXMLAttributes(xmlFile, "t", "t1");
       // PRL: to do: write other selection fields
       xmlFile.WriteAttr(wxT("title"), labelStruct.title);
       xmlFile.EndTag(wxT("label"));
@@ -670,9 +835,7 @@ void LabelTrack::WriteXML(XMLWriter &xmlFile) const
 Track::Holder LabelTrack::Cut(double t0, double t1)
 {
    auto tmp = Copy(t0, t1);
-
    Clear(t0, t1);
-
    return tmp;
 }
 
@@ -693,6 +856,7 @@ Track::Holder LabelTrack::SplitCut(double t0, double t1)
 Track::Holder LabelTrack::Copy(double t0, double t1, bool) const
 {
    auto tmp = std::make_shared<LabelTrack>();
+   tmp->Init(*this);
    const auto lt = static_cast<LabelTrack*>(tmp.get());
 
    for (auto &labelStruct: mLabels) {
@@ -741,16 +905,16 @@ Track::Holder LabelTrack::Copy(double t0, double t1, bool) const
 }
 
 
-bool LabelTrack::PasteOver(double t, const Track * src)
+bool LabelTrack::PasteOver(double t, const Track &src)
 {
-   auto result = src->TypeSwitch< bool >( [&](const LabelTrack *sl) {
+   auto result = src.TypeSwitch<bool>([&](const LabelTrack &sl) {
       int len = mLabels.size();
       int pos = 0;
 
       while (pos < len && mLabels[pos].getT0() < t)
          pos++;
 
-      for (auto &labelStruct: sl->mLabels) {
+      for (auto &labelStruct: sl.mLabels) {
          LabelStruct l {
             labelStruct.selectedRegion,
             labelStruct.getT0() + t,
@@ -761,27 +925,27 @@ bool LabelTrack::PasteOver(double t, const Track * src)
       }
 
       return true;
-   } );
+   });
 
-   if (! result )
+   if (!result)
       // THROW_INCONSISTENCY_EXCEPTION; // ?
       (void)0;// intentionally do nothing
 
    return result;
 }
 
-void LabelTrack::Paste(double t, const Track *src)
+void LabelTrack::Paste(double t, const Track &src)
 {
-   bool bOk = src->TypeSwitch< bool >( [&](const LabelTrack *lt) {
-      double shiftAmt = lt->mClipLen > 0.0 ? lt->mClipLen : lt->GetEndTime();
+   bool bOk = src.TypeSwitch<bool>([&](const LabelTrack &lt) {
+      double shiftAmt = lt.mClipLen > 0.0 ? lt.mClipLen : lt.GetEndTime();
 
       ShiftLabelsOnInsert(shiftAmt, t);
       PasteOver(t, src);
 
       return true;
-   } );
+   });
 
-   if ( !bOk )
+   if (!bOk)
       // THROW_INCONSISTENCY_EXCEPTION; // ?
       (void)0;// intentionally do nothing
 }
@@ -856,8 +1020,7 @@ void LabelTrack::SyncLockAdjust(double oldT1, double newT1)
    }
 }
 
-
-void LabelTrack::Silence(double t0, double t1)
+void LabelTrack::Silence(double t0, double t1, ProgressReporter)
 {
    int len = mLabels.size();
 
@@ -940,10 +1103,8 @@ int LabelTrack::AddLabel(const SelectedRegion &selectedRegion,
 
    mLabels.insert(mLabels.begin() + pos, l);
 
-   LabelTrackEvent evt{
-      EVT_LABELTRACK_ADDITION, SharedPointer<LabelTrack>(), title, -1, pos
-   };
-   ProcessEvent( evt );
+   Publish({ LabelTrackEvent::Addition,
+      this->SharedPointer<LabelTrack>(), title, -1, pos });
 
    return pos;
 }
@@ -955,10 +1116,8 @@ void LabelTrack::DeleteLabel(int index)
    const auto title = iter->title;
    mLabels.erase(iter);
 
-   LabelTrackEvent evt{
-      EVT_LABELTRACK_DELETION, SharedPointer<LabelTrack>(), title, index, -1
-   };
-   ProcessEvent( evt );
+   Publish({ LabelTrackEvent::Deletion,
+      this->SharedPointer<LabelTrack>(), title, index, -1 });
 }
 
 /// Sorts the labels in order of their starting times.
@@ -992,11 +1151,8 @@ void LabelTrack::SortLabels()
       );
 
       // Let listeners update their stored indices
-      LabelTrackEvent evt{
-         EVT_LABELTRACK_PERMUTED, SharedPointer<LabelTrack>(),
-         mLabels[j].title, i, j
-      };
-      ProcessEvent( evt );
+      Publish({ LabelTrackEvent::Permutation,
+         this->SharedPointer<LabelTrack>(), mLabels[j].title, i, j });
    }
 }
 

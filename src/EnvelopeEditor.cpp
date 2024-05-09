@@ -8,7 +8,7 @@
 
 **********************************************************************/
 
-#include "Audacity.h"
+
 #include "EnvelopeEditor.h"
 
 
@@ -18,9 +18,11 @@
 
 #include "AColor.h"
 #include "Envelope.h"
+#include "TrackArt.h"
 #include "TrackArtist.h"
 #include "TrackPanelDrawingContext.h"
 #include "ViewInfo.h"
+#include "tracks/ui/EnvelopeHandle.h"
 
 namespace {
 void DrawPoint(wxDC & dc, const wxRect & r, int x, int y, bool top)
@@ -32,11 +34,10 @@ void DrawPoint(wxDC & dc, const wxRect & r, int x, int y, bool top)
 }
 }
 
-void EnvelopeEditor::DrawPoints
-(const Envelope &env,
+void EnvelopeEditor::DrawPoints(const Envelope &env,
  TrackPanelDrawingContext &context, const wxRect & r,
  bool dB, double dBRange,
- float zoomMin, float zoomMax, bool mirrored)
+ float zoomMin, float zoomMax, bool mirrored, int origin)
 {
    auto &dc = context.dc;
    const auto artist = TrackArtist::Get( context );
@@ -45,7 +46,7 @@ void EnvelopeEditor::DrawPoints
    bool highlight = false;
 #ifdef EXPERIMENTAL_TRACK_PANEL_HIGHLIGHTING
    auto target = dynamic_cast<EnvelopeHandle*>(context.target.get());
-   highlight = target && target->GetEnvelope() == this;
+   highlight = target && target->GetEnvelope() == &env;
 #endif
    wxPen &pen = highlight ? AColor::uglyPen : AColor::envelopePen;
    dc.SetPen( pen );
@@ -53,7 +54,7 @@ void EnvelopeEditor::DrawPoints
 
    for (int i = 0; i < (int)env.GetNumberOfPoints(); i++) {
       const double time = env[i].GetT() + env.GetOffset();
-      const wxInt64 position = zoomInfo.TimeToPosition(time);
+      const wxInt64 position = zoomInfo.TimeToPosition(time, origin);
       if (position >= 0 && position < r.width) {
          // Change colour if this is the draggable point...
          if (i == env.GetDragPoint()) {

@@ -18,7 +18,7 @@
 #ifndef __AUDACITY_TRACKARTIST__
 #define __AUDACITY_TRACKARTIST__
 
-#include "Audacity.h" // for USE_* macros
+
 
 
 #include <wx/brush.h> // member variable
@@ -28,6 +28,7 @@
 
 class wxRect;
 
+class PendingTracks;
 class TrackList;
 class TrackPanel;
 class SelectedRegion;
@@ -35,22 +36,6 @@ class Track;
 class TrackPanel;
 struct TrackPanelDrawingContext;
 class ZoomInfo;
-
-namespace TrackArt {
-
-   // Helper: draws the "sync-locked" watermark tiled to a rectangle
-   void DrawSyncLockTiles(
-      TrackPanelDrawingContext &context, const wxRect &rect );
-
-   // Helper: draws background with selection rect
-   void DrawBackgroundWithSelection(TrackPanelDrawingContext &context,
-         const wxRect &rect, const Track *track,
-         const wxBrush &selBrush, const wxBrush &unselBrush,
-         bool useSelection = true);
-
-   void DrawNegativeOffsetTrackArrows( TrackPanelDrawingContext &context,
-                                       const wxRect & rect );
-}
 
 class AUDACITY_DLL_API TrackArtist final : private PrefsListener {
 
@@ -73,14 +58,6 @@ public:
    ~TrackArtist();
    static TrackArtist *Get( TrackPanelDrawingContext & );
 
-   void SetBackgroundBrushes(wxBrush unselectedBrushIn, wxBrush selectedBrushIn,
-                             wxPen unselectedPenIn, wxPen selectedPenIn) {
-     this->unselectedBrush = unselectedBrushIn;
-     this->selectedBrush = selectedBrushIn;
-     this->unselectedPen = unselectedPenIn;
-     this->selectedPen = selectedPenIn;
-   }
-
    void SetColours(int iColorIndex);
 
    void UpdatePrefs() override;
@@ -92,7 +69,6 @@ public:
    float mdBrange;            // "/GUI/EnvdBRange"
    bool mShowClipping;        // "/GUI/ShowClipping"
    int  mSampleDisplay;
-   bool mbShowTrackNameInTrack;  // "/GUI/ShowTrackNameInWaveform"
 
    wxBrush blankBrush;
    wxBrush unselectedBrush;
@@ -112,10 +88,16 @@ public:
    wxPen muteSamplePen;
    wxPen odProgressNotYetPen;
    wxPen odProgressDonePen;
-   wxPen shadowPen;
    wxPen clippedPen;
    wxPen muteClippedPen;
    wxPen blankSelectedPen;
+
+   wxPen beatSepearatorPen;
+   wxPen barSepearatorPen;
+   wxBrush beatStrongBrush;
+   wxBrush beatWeakBrush;
+   wxBrush beatStrongSelBrush;
+   wxBrush beatWeakSelBrush;
 
 #ifdef EXPERIMENTAL_FFT_Y_GRID
    bool fftYGridOld;
@@ -130,18 +112,13 @@ public:
 
    const SelectedRegion *pSelectedRegion{};
    ZoomInfo *pZoomInfo{};
+   const PendingTracks *pPendingTracks{};
 
    bool drawEnvelope{ false };
    bool bigPoints{ false };
    bool drawSliders{ false };
+   bool onBrushTool{ false };
    bool hasSolo{ false };
 };
-
-extern int GetWaveYPos(float value, float min, float max,
-                       int height, bool dB, bool outer, float dBr,
-                       bool clip);
-extern float FromDB(float value, double dBRange);
-extern float ValueOfPixel(int yy, int height, bool offset,
-                          bool dB, double dBRange, float zoomMin, float zoomMax);
 
 #endif                          // define __AUDACITY_TRACKARTIST__

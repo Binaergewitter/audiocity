@@ -8,18 +8,18 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../Audacity.h"
+
 #include "TrackSelectHandle.h"
 
-#include "TrackView.h"
+#include "ChannelView.h"
 #include "../../HitTestResult.h"
-#include "../../Project.h"
-#include "../../ProjectAudioIO.h"
-#include "../../ProjectHistory.h"
+#include "Project.h"
+#include "ProjectAudioIO.h"
+#include "ProjectHistory.h"
 #include "../../RefreshCode.h"
 #include "../../SelectUtilities.h"
 #include "../../TrackPanelMouseEvent.h"
-#include "../../Track.h"
+#include "Track.h"
 
 #include <wx/cursor.h>
 #include <wx/translation.h>
@@ -65,6 +65,11 @@ TrackSelectHandle::~TrackSelectHandle()
 {
 }
 
+std::shared_ptr<const Track> TrackSelectHandle::FindTrack() const
+{
+   return mpTrack;
+}
+
 UIHandle::Result TrackSelectHandle::Click
 (const TrackPanelMouseEvent &evt, AudacityProject *pProject)
 {
@@ -100,7 +105,7 @@ UIHandle::Result TrackSelectHandle::Click
    }
 
    SelectUtilities::DoListSelection(*pProject,
-      pTrack.get(), event.ShiftDown(), event.ControlDown(), !unsafe);
+      *pTrack, event.ShiftDown(), event.ControlDown(), !unsafe);
 
    mClicked = true;
    return result;
@@ -111,6 +116,8 @@ UIHandle::Result TrackSelectHandle::Drag
 {
    using namespace RefreshCode;
    Result result = RefreshNone;
+   if (!mpTrack)
+      return result;
 
    const wxMouseEvent &event = evt.event;
 
@@ -122,12 +129,12 @@ UIHandle::Result TrackSelectHandle::Drag
       return result;
 
    if (event.m_y < mMoveUpThreshold || event.m_y < 0) {
-      tracks.MoveUp(mpTrack.get());
+      tracks.MoveUp(*mpTrack);
       --mRearrangeCount;
    }
    else if ( event.m_y > mMoveDownThreshold
       || event.m_y > evt.whole.GetHeight() ) {
-      tracks.MoveDown(mpTrack.get());
+      tracks.MoveDown(*mpTrack);
       ++mRearrangeCount;
    }
    else
@@ -156,12 +163,12 @@ HitTestPreview TrackSelectHandle::Preview
    //static auto clickedCursor =
    //   ::MakeCursor(wxCURSOR_HAND, RearrangingCursorXpm, 16, 16);
 
-   const auto trackCount = TrackList::Get( *project ).Leaders().size();
+   const auto trackCount = TrackList::Get( *project ).Any().size();
    auto message = Message(trackCount);
    if (mClicked) {
       const bool unsafe =
          ProjectAudioIO::Get( *project ).IsAudioActive();
-      const bool canMove = TrackList::Get( *project ).Leaders().size() > 1;
+      const bool canMove = TrackList::Get( *project ).Any().size() > 1;
       return {
          message,
          (unsafe
@@ -223,19 +230,19 @@ void TrackSelectHandle::CalculateRearrangingThresholds(
 
    auto &tracks = TrackList::Get( *project );
 
-   if (tracks.CanMoveUp(mpTrack.get()))
+   if (mpTrack && tracks.CanMoveUp(*mpTrack))
       mMoveUpThreshold =
          event.m_y -
-            TrackView::GetChannelGroupHeight(
-               * -- tracks.FindLeader( mpTrack.get() ) );
+            ChannelView::GetChannelGroupHeight(
+               * -- tracks.Find(mpTrack.get()));
    else
       mMoveUpThreshold = INT_MIN;
 
-   if (tracks.CanMoveDown(mpTrack.get()))
+   if (mpTrack && tracks.CanMoveDown(*mpTrack))
       mMoveDownThreshold =
          event.m_y +
-            TrackView::GetChannelGroupHeight(
-               * ++ tracks.FindLeader( mpTrack.get() ) );
+            ChannelView::GetChannelGroupHeight(
+               * ++ tracks.Find(mpTrack.get()));
    else
       mMoveDownThreshold = INT_MAX;
 }

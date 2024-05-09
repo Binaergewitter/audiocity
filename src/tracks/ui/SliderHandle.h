@@ -14,11 +14,12 @@ Paul Licameli
 #include "../../UIHandle.h"
 
 class wxMouseEvent;
+class wxMouseState;
 class LWSlider;
 class Track;
 class TranslatableString;
 
-class SliderHandle /* not final */ : public UIHandle
+class AUDACITY_DLL_API SliderHandle /* not final */ : public UIHandle
 {
    SliderHandle(const SliderHandle&) = delete;
 
@@ -31,8 +32,9 @@ public:
 
    SliderHandle &operator=(const SliderHandle&) = default;
 
+   std::shared_ptr<const Track> FindTrack() const override;
    std::shared_ptr<Track> GetTrack() const { return mpTrack.lock(); }
-   bool IsClicked() const { return mIsClicked; }
+   bool IsDragging() const override;
 
 protected:
    virtual ~SliderHandle();
@@ -78,7 +80,7 @@ protected:
 
    float mStartingValue {};
 
-   bool mIsClicked{};
+   bool mIsDragging{};
 };
 
 #endif

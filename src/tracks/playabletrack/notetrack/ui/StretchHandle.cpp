@@ -8,25 +8,26 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../../../Audacity.h" // for USE_* macros
+
 
 #ifdef USE_MIDI
-#include "../lib-src/header-substitutes/allegro.h"
+#include "WrapAllegro.h"
 
 #include "StretchHandle.h"
 
 #include "../../../ui/CommonTrackPanelCell.h"
 #include "../../../../HitTestResult.h"
-#include "../../../../NoteTrack.h"
-#include "../../../../ProjectAudioIO.h"
-#include "../../../../ProjectHistory.h"
-#include "../../../../ProjectSettings.h"
+#include "NoteTrack.h"
+#include "ProjectAudioIO.h"
+#include "ProjectHistory.h"
 #include "../../../../RefreshCode.h"
+#include "SyncLock.h"
 #include "../../../../TrackPanelMouseEvent.h"
-#include "../../../../UndoManager.h"
-#include "../../../../ViewInfo.h"
+#include "UndoManager.h"
+#include "ViewInfo.h"
 #include "../../../../../images/Cursors.h"
 
+#include <wx/event.h>
 #include <algorithm>
 
 StretchHandle::StretchHandle
@@ -155,6 +156,11 @@ StretchHandle::~StretchHandle()
 {
 }
 
+std::shared_ptr<const Track> StretchHandle::FindTrack() const
+{
+   return mpTrack;
+}
+
 UIHandle::Result StretchHandle::Click
 (const TrackPanelMouseEvent &evt, AudacityProject *pProject)
 {
@@ -197,14 +203,14 @@ UIHandle::Result StretchHandle::Drag
    const wxMouseEvent &event = evt.event;
    const int x = event.m_x;
 
-   Track *clickedTrack=nullptr;
+   Channel *clickedChannel = nullptr;
    if (evt.pCell)
-      clickedTrack =
-         static_cast<CommonTrackPanelCell*>(evt.pCell.get())->FindTrack().get();
+      clickedChannel =
+         static_cast<CommonChannelCell*>(evt.pCell.get())->FindChannel().get();
 
-   if (clickedTrack == nullptr && mpTrack != nullptr)
-      clickedTrack = mpTrack.get();
-   Stretch(pProject, x, mLeftEdge, clickedTrack);
+   if (clickedChannel == nullptr && mpTrack != nullptr)
+      clickedChannel = mpTrack.get();
+   Stretch(pProject, x, mLeftEdge, clickedChannel);
    return RefreshAll;
 }
 
@@ -220,6 +226,8 @@ UIHandle::Result StretchHandle::Release
  wxWindow *)
 {
    using namespace RefreshCode;
+   if (!mpTrack)
+      return RefreshNone;
 
    const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if (unsafe) {
@@ -229,25 +237,23 @@ UIHandle::Result StretchHandle::Release
 
    bool left = mStretchState.mMode == stretchLeft;
    bool right = mStretchState.mMode == stretchRight;
-   const auto &settings = ProjectSettings::Get( *pProject );
    auto &viewInfo = ViewInfo::Get( *pProject );
-   if ( settings.IsSyncLocked() && ( left || right ) ) {
-      for ( auto track :
-           TrackList::SyncLockGroup( mpTrack.get() ) ) {
-         if ( track != mpTrack.get() ) {
-            if ( left ) {
+   if (SyncLockState::Get(*pProject).IsSyncLocked() && (left || right)) {
+      for (auto track : SyncLock::Group(*mpTrack)) {
+         if (track != mpTrack.get()) {
+            if (left) {
                auto origT0 = mStretchState.mOrigSel0Quantized;
                auto diff = viewInfo.selectedRegion.t0() - origT0;
-               if ( diff > 0)
-                  track->SyncLockAdjust( origT0 + diff, origT0 );
+               if (diff > 0)
+                  track->SyncLockAdjust(origT0 + diff, origT0);
                else
-                  track->SyncLockAdjust( origT0, origT0 - diff );
-               track->Offset( diff );
+                  track->SyncLockAdjust(origT0, origT0 - diff);
+               track->ShiftBy(diff);
             }
             else {
                auto origT1 = mStretchState.mOrigSel1Quantized;
                auto diff = viewInfo.selectedRegion.t1() - origT1;
-               track->SyncLockAdjust( origT1, origT1 + diff );
+               track->SyncLockAdjust(origT1, origT1 + diff);
             }
          }
       }
@@ -282,14 +288,15 @@ double StretchHandle::GetT1(const Track &track, const ViewInfo &viewInfo)
 }
 
 void StretchHandle::Stretch(AudacityProject *pProject, int mouseXCoordinate, int trackLeftEdge,
-   Track *pTrack)
+   Channel *pChannel)
 {
    auto &viewInfo = ViewInfo::Get( *pProject );
 
-   if (pTrack == NULL && mpTrack != NULL)
-      pTrack = mpTrack.get();
+   if (pChannel == nullptr && mpTrack != nullptr)
+      pChannel = mpTrack.get();
 
-  if (pTrack) pTrack->TypeSwitch( [&](NoteTrack *pNt) {
+  if (const auto pNt = dynamic_cast<NoteTrack*>(pChannel)) {
+      auto &nt = *pNt;
       double moveto =
         std::max(0.0, viewInfo.PositionToTime(mouseXCoordinate, trackLeftEdge));
 
@@ -308,9 +315,9 @@ void StretchHandle::Stretch(AudacityProject *pProject, int mouseXCoordinate, int
          dur = t1 - moveto;
          if (dur < mStretchState.mRightBeats * minPeriod)
             return;
-         pNt->StretchRegion
+         nt.StretchRegion
             ( mStretchState.mBeat0, mStretchState.mBeat1, dur );
-         pNt->Offset( moveto - t0 );
+         nt.ShiftBy(moveto - t0);
          mStretchState.mBeat0.first = moveto;
          viewInfo.selectedRegion.setT0(moveto);
          break;
@@ -319,7 +326,7 @@ void StretchHandle::Stretch(AudacityProject *pProject, int mouseXCoordinate, int
          dur = moveto - t0;
          if (dur < mStretchState.mLeftBeats * minPeriod)
             return;
-         pNt->StretchRegion
+         nt.StretchRegion
             ( mStretchState.mBeat0, mStretchState.mBeat1, dur );
          viewInfo.selectedRegion.setT1(moveto);
          mStretchState.mBeat1.first = moveto;
@@ -332,9 +339,9 @@ void StretchHandle::Stretch(AudacityProject *pProject, int mouseXCoordinate, int
          if ( left_dur < mStretchState.mLeftBeats * minPeriod ||
               right_dur < mStretchState.mRightBeats * minPeriod )
             return;
-         pNt->StretchRegion
+         nt.StretchRegion
             ( mStretchState.mBeatCenter, mStretchState.mBeat1, right_dur );
-         pNt->StretchRegion
+         nt.StretchRegion
             ( mStretchState.mBeat0, mStretchState.mBeatCenter, left_dur );
          mStretchState.mBeatCenter.first = moveto;
          break;
@@ -343,6 +350,6 @@ void StretchHandle::Stretch(AudacityProject *pProject, int mouseXCoordinate, int
          wxASSERT(false);
          break;
       }
-  });
+  };
 }
 #endif

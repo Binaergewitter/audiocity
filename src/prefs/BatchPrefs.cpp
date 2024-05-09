@@ -14,16 +14,14 @@
 setting used in debugging batch (aka macros) processing.
 *//*******************************************************************/
 
-#include "../Audacity.h"
+
 #include "BatchPrefs.h"
 
 #include <wx/defs.h>
-#include <wx/intl.h>
 #include <wx/textdlg.h>
 
-#include "../Languages.h"
-#include "../Prefs.h"
-#include "../ShuttleGui.h"
+#include "Prefs.h"
+#include "ShuttleGui.h"
 
 BEGIN_EVENT_TABLE(BatchPrefs, PrefsPanel)
 END_EVENT_TABLE()
@@ -35,17 +33,17 @@ BatchPrefs::BatchPrefs(wxWindow * parent, wxWindowID winid):
    Populate();
 }
 
-ComponentInterfaceSymbol BatchPrefs::GetSymbol()
+ComponentInterfaceSymbol BatchPrefs::GetSymbol() const
 {
    return BATCH_PREFS_PLUGIN_SYMBOL;
 }
 
-TranslatableString BatchPrefs::GetDescription()
+TranslatableString BatchPrefs::GetDescription() const
 {
    return XO("Preferences for Batch");
 }
 
-wxString BatchPrefs::HelpPageName()
+ManualPageID BatchPrefs::HelpPageName()
 {
    return  "Batch_Preferences";
 }

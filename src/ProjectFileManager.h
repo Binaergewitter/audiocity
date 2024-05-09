@@ -11,6 +11,7 @@ Paul Licameli split from AudacityProject.h
 #ifndef __AUDACITY_PROJECT_FILE_MANAGER__
 #define __AUDACITY_PROJECT_FILE_MANAGER__
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -24,11 +25,11 @@ class Track;
 class TrackList;
 class WaveTrack;
 class XMLTagHandler;
+class ClipMirAudioReader;
 
-using WaveTrackArray = std::vector < std::shared_ptr < WaveTrack > >;
-using TrackHolders = std::vector< WaveTrackArray >;
+using TrackHolders = std::vector<std::shared_ptr<Track>>;
 
-class ProjectFileManager final
+class AUDACITY_DLL_API ProjectFileManager final
    : public ClientData::Base
 {
 public:
@@ -39,19 +40,9 @@ public:
    static void DiscardAutosave(const FilePath &filename);
 
    explicit ProjectFileManager( AudacityProject &project );
-   ProjectFileManager( const ProjectFileManager & ) PROHIBITED;
-   ProjectFileManager &operator=( const ProjectFileManager & ) PROHIBITED;
+   ProjectFileManager( const ProjectFileManager & ) = delete;
+   ProjectFileManager &operator=( const ProjectFileManager & ) = delete;
    ~ProjectFileManager();
-
-   struct ReadProjectResults
-   {
-      bool parseSuccess;
-      bool trackError;
-      const TranslatableString errorString;
-      wxString helpUrl;
-   };
-   ReadProjectResults ReadProjectFile(
-      const FilePath &fileName, bool discardAutosave = false );
 
    bool OpenProject();
    void CloseProject();
@@ -91,10 +82,22 @@ public:
 
    static bool IsAlreadyOpen(const FilePath &projPathName);
 
-   void OpenFile(const FilePath &fileName, bool addtohistory = true);
+   //! A function that returns a project to use for opening a file; argument is true if opening a project file
+   using ProjectChooserFn = std::function<AudacityProject&(bool)>;
 
-   bool Import(const FilePath &fileName,
-               bool addToHistory = true);
+   /*!
+    Opens files of many kinds.  In case of import (sound, MIDI, or .aup), the undo history is pushed.
+    @param chooser told whether opening a project file; decides which project to open into
+    @param fileName the name and contents are examined to decide a type and open appropriately
+    @param addtohistory whether to add .aup3 files to the MRU list (but always done for imports)
+    @return if something was successfully opened, the project containing it; else null
+    */
+   static AudacityProject *OpenFile( const ProjectChooserFn &chooser,
+      const FilePath &fileName, bool addtohistory = true);
+
+   bool
+   Import(const std::vector<FilePath>& fileNames, bool addToHistory = true);
+   bool Import(const FilePath& fileName, bool addToHistory = true);
 
    void Compact();
 
@@ -104,15 +107,60 @@ public:
    bool GetMenuClose() const { return mMenuClose; }
    void SetMenuClose(bool value) { mMenuClose = value; }
 
+   /*!
+    * \brief Attempts to find and fix problems in tracks.
+    * \param tracks A list of tracks to be fixed
+    * \param onError Called each time unrepairable error has been found.
+    * \param onUnlink Called when tracks unlinked due to link inconsistency.
+    */
+   static void FixTracks(TrackList& tracks,
+                         const std::function<void(const TranslatableString&/*errorMessage*/)>& onError,
+                         const std::function<void(const TranslatableString&/*unlinkReason*/)>& onUnlink);
+
 private:
+   bool Import(
+      const FilePath& fileName, bool addToHistory,
+      std::shared_ptr<ClipMirAudioReader>& resultingReader);
+
+   /*!
+    @param fileName a path assumed to exist and contain an .aup3 project
+    @param addtohistory whether to add the file to the MRU list
+    @return if something was successfully opened, the project containing it; else null
+    */
+   AudacityProject *OpenProjectFile(
+      const FilePath &fileName, bool addtohistory);
+
+   struct ReadProjectResults
+   {
+      bool parseSuccess;
+      bool trackError;
+      const TranslatableString errorString;
+      wxString helpUrl;
+   };
+   ReadProjectResults ReadProjectFile(
+      const FilePath &fileName, bool discardAutosave = false );
+
    bool DoSave(const FilePath & fileName, bool fromSaveAs);
 
    AudacityProject &mProject;
 
    std::shared_ptr<TrackList> mLastSavedTracks;
-   
+
    // Are we currently closing as the result of a menu command?
    bool mMenuClose{ false };
+};
+
+class wxTopLevelWindow;
+
+//! TitleRestorer restores project window titles to what they were,
+//! in its destructor.
+class TitleRestorer{
+public:
+   TitleRestorer( wxTopLevelWindow &window, AudacityProject &project );
+   ~TitleRestorer();
+   wxString sProjNumber;
+   wxString sProjName;
+   size_t UnnamedCount;
 };
 
 #endif

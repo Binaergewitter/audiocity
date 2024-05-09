@@ -27,7 +27,11 @@ public:
 
    ~TimeTrackVZoomHandle() override;
 
+   std::shared_ptr<const Track> FindTrack() const override;
+
    void Enter( bool forward, AudacityProject * ) override;
+
+   bool HandlesRightClick() override;
 
    Result Click
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;

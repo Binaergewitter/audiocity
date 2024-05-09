@@ -18,14 +18,14 @@
 
 *//********************************************************************/
 
-#include "../Audacity.h"
+
 #include "PlaybackPrefs.h"
 
 #include <wx/defs.h>
 #include <wx/textctrl.h>
 
-#include "../ShuttleGui.h"
-#include "../Prefs.h"
+#include "ShuttleGui.h"
+#include "Prefs.h"
 
 PlaybackPrefs::PlaybackPrefs(wxWindow * parent, wxWindowID winid)
 :  PrefsPanel(parent, winid, XO("Playback"))
@@ -37,17 +37,17 @@ PlaybackPrefs::~PlaybackPrefs()
 {
 }
 
-ComponentInterfaceSymbol PlaybackPrefs::GetSymbol()
+ComponentInterfaceSymbol PlaybackPrefs::GetSymbol() const
 {
    return PLAYBACK_PREFS_PLUGIN_SYMBOL;
 }
 
-TranslatableString PlaybackPrefs::GetDescription()
+TranslatableString PlaybackPrefs::GetDescription() const
 {
    return XO("Preferences for Playback");
 }
 
-wxString PlaybackPrefs::HelpPageName()
+ManualPageID PlaybackPrefs::HelpPageName()
 {
    return "Playback_Preferences";
 }
@@ -146,7 +146,8 @@ void PlaybackPrefs::PopulateOrExchange(ShuttleGui & S)
    {
       S.StartVerticalLay();
       {
-         S.TieCheckBox(XXO("&Vari-Speed Play"), {"/AudioIO/VariSpeedPlay", true});
+         //Removing Vari-Speed Play from PlaybackPrefs
+         //S.TieCheckBox(XXO("&Vari-Speed Play"), {"/AudioIO/VariSpeedPlay", true});
          S.TieCheckBox(XXO("&Micro-fades"), {"/AudioIO/Microfades", false});
          S.TieCheckBox(XXO("Always scrub un&pinned"),
             {UnpinnedScrubbingPreferenceKey(),

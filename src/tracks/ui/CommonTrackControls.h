@@ -17,13 +17,12 @@ class CloseButtonHandle;
 class MenuButtonHandle;
 class PopupMenuTable;
 class MinimizeButtonHandle;
-class SelectButtonHandle;
 class TrackSelectHandle;
 
 namespace TrackInfo{ struct TCPLine; }
 using TCPLines = std::vector< TrackInfo::TCPLine >;
 
-class CommonTrackControls /* not final */ : public TrackControls
+class AUDACITY_DLL_API CommonTrackControls /* not final */ : public TrackControls
 {
 public:
    using TrackControls::TrackControls;
@@ -34,17 +33,12 @@ public:
    {
    public:
       AudacityProject &project;
-      Track *pTrack;
+      Track &track;
       wxWindow *pParent;
       unsigned result;
    };
 
-   // This decides what details to draw in the track control panel, besides
-   // those at the bottom
-   virtual const TCPLines& GetTCPLines() const;
-
-   // To help subclasses define GetTCPLines
-   static const TCPLines& StaticTCPLines();
+   const TCPLines& GetTCPLines() const override;
 
 protected:
    // An override is supplied for derived classes to call through but it is
@@ -54,7 +48,7 @@ protected:
        const AudacityProject *) override = 0;
 
    unsigned DoContextMenu
-      (const wxRect &rect, wxWindow *pParent, wxPoint *pPosition,
+      (const wxRect &rect, wxWindow *pParent, const wxPoint *pPosition,
        AudacityProject *pProject) override;
    virtual PopupMenuTable *GetMenuExtension(Track *pTrack) = 0;
 
@@ -70,7 +64,6 @@ protected:
    std::weak_ptr<CloseButtonHandle> mCloseHandle;
    std::weak_ptr<MenuButtonHandle> mMenuHandle;
    std::weak_ptr<MinimizeButtonHandle> mMinimizeHandle;
-   std::weak_ptr<SelectButtonHandle> mSelectButtonHandle;
    std::weak_ptr<TrackSelectHandle> mSelectHandle;
 };
 

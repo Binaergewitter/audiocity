@@ -8,86 +8,90 @@
 
 *******************************************************************//**
 \class EffectTwoPassSimpleMono
-\brief An Effect base class that implements a two pass process by using
-EffectSimpleMono.
+\brief An Effect base class that implements a two pass process.
 
 Inherit from it if your effect needs to pass twice over the data.
 It does the first pass on all selected tracks before going back and
 doing the second pass over all selected tracks.
 
 *//*******************************************************************/
-
-
-#include "../Audacity.h"
 #include "TwoPassSimpleMono.h"
+#include "EffectOutputTracks.h"
+#include "WaveTrack.h"
 
-#include "../WaveTrack.h"
+EffectTwoPassSimpleMono::~EffectTwoPassSimpleMono() = default;
 
-bool EffectTwoPassSimpleMono::Process()
+bool EffectTwoPassSimpleMono::Process(
+   EffectInstance &, EffectSettings &settings)
 {
    mPass = 0;
    mSecondPassDisabled = false;
 
    InitPass1();
-   this->CopyInputTracks(); // Set up mOutputTracks.
+   EffectOutputTracks outputs { *mTracks, GetType(), { { mT0, mT1 } } };
 
-   mWorkTracks = TrackList::Create(
-      const_cast<AudacityProject*>( FindProject() ) );
-   for (auto track : mOutputTracks->Selected< WaveTrack >()) {
-      mWorkTracks->Add(track->EmptyCopy())->ConvertToSampleFormat(floatSample);
-      if( mT0 > 0 )
-         mWorkTracks->back()->InsertSilence(0, mT0);
+   mWorkTracks = TrackList::Create(const_cast<AudacityProject*>(FindProject()));
+   for (auto track : outputs.Get().Selected<WaveTrack>()) {
+      auto pNewTrack = track->EmptyCopy();
+      mWorkTracks->Add(pNewTrack);
+   }
+   for (const auto pNewTrack : mWorkTracks->Any<WaveTrack>()) {
+      pNewTrack->ConvertToSampleFormat(floatSample);
    }
 
-   mTrackLists[0] = &mOutputTracks;
-   mTrackLists[1] = mSecondPassDisabled ? &mOutputTracks : &mWorkTracks;
+   mTrackLists[0] = &outputs.Get();
+   mTrackLists[1] = mSecondPassDisabled ? mTrackLists[0] : &*mWorkTracks;
 
-   bool bGoodResult = ProcessPass();
-
-   if (bGoodResult && !mSecondPassDisabled)
-   {
+   bool bGoodResult = ProcessPass(settings);
+   if (bGoodResult && !mSecondPassDisabled) {
       mPass = 1;
       if (InitPass2())
-         bGoodResult = ProcessPass();
+         bGoodResult = ProcessPass(settings);
    }
 
    mWorkTracks->Clear();
    mWorkTracks.reset();
 
-   this->ReplaceProcessedTracks(bGoodResult);
+   if (bGoodResult)
+      outputs.Commit();
+
    return bGoodResult;
 }
 
-bool EffectTwoPassSimpleMono::ProcessPass()
+bool EffectTwoPassSimpleMono::ProcessPass(EffectSettings &settings)
 {
-   //Iterate over each track
+   // Iterate over each track
    mCurTrackNum = 0;
 
-   auto outTracks = (*mTrackLists[1 - mPass])->Selected< WaveTrack >().begin();
-   for( auto track : (*mTrackLists[mPass])->Selected< WaveTrack >() ) {
+   auto outTracks =
+      (*mTrackLists[1 - mPass]).Selected<WaveTrack>().begin();
+   for (auto track : (*mTrackLists[mPass]).Selected<WaveTrack>()) {
       auto outTrack = *outTracks;
 
-      //Get start and end times from track
-      double trackStart = track->GetStartTime();
-      double trackEnd = track->GetEndTime();
+      // Get start and end times from the orignal track
+      double trackStart = mPass == 0 ? track->GetStartTime() : (*outTracks)->GetStartTime();
+      double trackEnd = mPass == 0 ? track->GetEndTime() : (*outTracks)->GetEndTime();
 
-      //Set the current bounds to whichever left marker is
-      //greater and whichever right marker is less:
-      mCurT0 = mT0 < trackStart? trackStart: mT0;
-      mCurT1 = mT1 > trackEnd? trackEnd: mT1;
+      // Set the current bounds to whichever left marker is
+      // greater and whichever right marker is less:
+      mCurT0 = std::max(trackStart, mT0);
+      mCurT1 = std::min(trackEnd, mT1);
+
+      // So that in ProcessOne(), when mPass == 0, samples are
+      // appended starting at mCurT0
+      if (!mSecondPassDisabled && mPass == 0 && mCurT0 > 0)
+            (*outTracks)->InsertSilence(0, mCurT0);
 
       // Process only if the right marker is to the right of the left marker
       if (mCurT1 > mCurT0) {
-
-         //Transform the marker timepoints to samples
+         // Transform the marker timepoints to samples
          auto start = track->TimeToLongSamples(mCurT0);
          auto end = track->TimeToLongSamples(mCurT1);
 
-         //Get the track rate and samples
+         // Get the track rate and samples
          mCurRate = track->GetRate();
-         mCurChannel = track->GetChannel();
 
-         //NewTrackPass1/2() returns true by default
+         // NewTrackPass1/2() returns true by default
          bool ret;
          if (mPass == 0)
             ret = NewTrackPass1();
@@ -96,125 +100,131 @@ bool EffectTwoPassSimpleMono::ProcessPass()
          if (!ret)
             return false;
 
-         //ProcessOne() (implemented below) processes a single track
-         if (!ProcessOne(track, outTrack, start, end))
-            return false;
+         // ProcessOne() (implemented below) processes a single track
+         auto outIter = outTrack->Channels().begin();
+         for (const auto pChannel : track->Channels())
+            if (!ProcessOne(*pChannel, **outIter++, start, end))
+               return false;
+         if (!mSecondPassDisabled && mPass == 0)
+            outTrack->Flush();
       }
 
-      mCurTrackNum++;
-      outTracks++;
+      ++mCurTrackNum;
+      ++outTracks;
    }
 
    return true;
 }
 
 
-//ProcessOne() takes a track, transforms it to bunch of buffer-blocks,
-//and executes TwoBufferProcessPass1 or TwoBufferProcessPass2 on these blocks
-bool EffectTwoPassSimpleMono::ProcessOne(WaveTrack * track, WaveTrack * outTrack,
-                                         sampleCount start, sampleCount end)
+// ProcessOne() takes a track, transforms it to bunch of buffer-blocks,
+// and executes TwoBufferProcessPass1 or TwoBufferProcessPass2 on these blocks
+bool EffectTwoPassSimpleMono::ProcessOne(WaveChannel &track,
+   WaveChannel &outTrack, sampleCount start, sampleCount end)
 {
    bool ret;
 
-   //Get the length of the buffer (as double). len is
-   //used simple to calculate a progress meter, so it is easier
-   //to make it a double now than it is to do it later
+   // Get the length of the buffer (as double). len is
+   // used simple to calculate a progress meter, so it is easier
+   // to make it a double now than it is to do it later
    auto len = (end - start).as_double();
-   auto maxblock = track->GetMaxBlockSize();
+   auto maxblock = track.GetMaxBlockSize();
 
-   //Initiate a processing buffer.  This buffer will (most likely)
-   //be shorter than the length of the track being processed.
+   // Initiate a processing buffer.  This buffer will (most likely)
+   // be shorter than the length of the track being processed.
    Floats buffer1{ maxblock };
    Floats buffer2{ maxblock };
    auto samples1 =  limitSampleBufferSize(
-      std::min( maxblock, track->GetBestBlockSize(start) ), end - start );
+      std::min(maxblock, track.GetBestBlockSize(start)), end - start);
 
-   //Get the samples from the track and put them in the buffer
-   track->Get((samplePtr) buffer1.get(), floatSample, start, samples1);
+   // Get the samples from the track and put them in the buffer
+   track.GetFloats(buffer1.get(), start, samples1);
 
-   // Process the first buffer with a NULL previous buffer
+   // Process the first buffer with a null previous buffer
    if (mPass == 0)
-      ret = TwoBufferProcessPass1(NULL, 0, buffer1.get(), samples1);
+      ret = TwoBufferProcessPass1(nullptr, 0, buffer1.get(), samples1);
    else
-      ret = TwoBufferProcessPass2(NULL, 0, buffer1.get(), samples1);
+      ret = TwoBufferProcessPass2(nullptr, 0, buffer1.get(), samples1);
    if (!ret)
-      //Return false because the effect failed.
+      // Return false because the effect failed.
       return false;
 
-   //Go through the track one buffer at a time. s counts which
-   //sample the current buffer starts at.
+   // Go through the track one buffer at a time. s counts which
+   // sample the current buffer starts at.
    auto s = start + samples1;
    while (s < end) {
-      //Get a block of samples (smaller than the size of the buffer)
-      //Adjust the block size if it is the final block in the track
+      // Get a block of samples (smaller than the size of the buffer)
+      // Adjust the block size if it is the final block in the track
       auto samples2 = limitSampleBufferSize(
-         std::min( track->GetBestBlockSize(s), maxblock ), end - s
-      );
+         std::min(track.GetBestBlockSize(s), maxblock), end - s);
 
-      //Get the samples from the track and put them in the buffer
-      track->Get((samplePtr)buffer2.get(), floatSample, s, samples2);
+      // Get the samples from the track and put them in the buffer
+      track.GetFloats(buffer2.get(), s, samples2);
 
-      //Process the buffer.  If it fails, clean up and exit.
+      // Process the buffer.  If it fails, clean up and exit.
       if (mPass == 0)
-         ret = TwoBufferProcessPass1(buffer1.get(), samples1, buffer2.get(), samples2);
+         ret = TwoBufferProcessPass1(buffer1.get(), samples1, buffer2.get(),
+            samples2);
       else
-         ret = TwoBufferProcessPass2(buffer1.get(), samples1, buffer2.get(), samples2);
+         ret = TwoBufferProcessPass2(buffer1.get(), samples1, buffer2.get(),
+            samples2);
       if (!ret)
-         //Return false because the effect failed.
+         // Return false because the effect failed.
          return false;
 
-      //Processing succeeded. copy the newly-changed samples back
-      //onto the track.
+      // Processing succeeded. copy the newly-changed samples back
+      // onto the track.
       if (mSecondPassDisabled || mPass != 0) {
-         outTrack->Set((samplePtr)buffer1.get(), floatSample, s - samples1, samples1);
+         if (!outTrack.SetFloats(buffer1.get(), s - samples1,
+            samples1))
+            return false;
       }
-      else {
-         outTrack->Append((samplePtr)buffer1.get(), floatSample, samples1);
-      }
+      else
+         outTrack.Append((samplePtr)buffer1.get(), floatSample, samples1);
 
-      //Increment s one blockfull of samples
+      // Increment s one blockfull of samples
       s += samples2;
 
-      //Update the Progress meter
+      // Update the Progress meter
       if (mSecondPassDisabled)
          ret = TotalProgress(
-            (mCurTrackNum + (s-start).as_double()/len) /
+            (mCurTrackNum + (s - start).as_double() / len) /
             GetNumWaveTracks());
       else
          ret = TotalProgress(
-            (mCurTrackNum + (s-start).as_double()/len + GetNumWaveTracks()*mPass) /
-            (GetNumWaveTracks()*2));
+            (mCurTrackNum + (s-start).as_double() / len +
+             GetNumWaveTracks() * mPass) /
+            (GetNumWaveTracks() * 2));
       if (ret)
-         //Return false because the effect failed.
+         // Return false because the effect failed.
          return false;
 
       // Rotate the buffers
       buffer1.swap(buffer2);
-
       std::swap(samples1, samples2);
    }
 
-   // Send the last buffer with a NULL pointer for the current buffer
+   // Send the last buffer with a null pointer for the current buffer
    if (mPass == 0)
-      ret = TwoBufferProcessPass1(buffer1.get(), samples1, NULL, 0);
+      ret = TwoBufferProcessPass1(buffer1.get(), samples1, nullptr, 0);
    else
-      ret = TwoBufferProcessPass2(buffer1.get(), samples1, NULL, 0);
+      ret = TwoBufferProcessPass2(buffer1.get(), samples1, nullptr, 0);
 
    if (!ret)
       //Return false because the effect failed.
       return false;
 
-   //Processing succeeded. copy the newly-changed samples back
-   //onto the track.
+   // Processing succeeded. copy the newly-changed samples back
+   // onto the track.
    if (mSecondPassDisabled || mPass != 0) {
-      outTrack->Set((samplePtr)buffer1.get(), floatSample, s - samples1, samples1);
+      if (!outTrack.SetFloats(buffer1.get(), s - samples1,
+         samples1))
+         return false;
    }
-   else {
-      outTrack->Append((samplePtr)buffer1.get(), floatSample, samples1);
-      outTrack->Flush();
-   }
+   else
+      outTrack.Append((samplePtr)buffer1.get(), floatSample, samples1);
 
-   //Return true because the effect processing succeeded.
+   // Return true because the effect processing succeeded.
    return true;
 }
 

@@ -16,11 +16,11 @@
 icons and colours.
 
 Provides:
- - Button to save current theme as a single png image.
- - Button to load theme from a single png image.
- - Button to save current theme to multiple png images.
- - Button to load theme from multiple png images.
- - (Optional) Button to save theme as Cee data.
+ - Button to save each theme as a single png image.
+ - Button to load current theme from a single png image.
+ - Button to save each theme to multiple png images.
+ - Button to load themes from multiple png images.
+ - (Optional) Button to save each theme as Cee data.
  - Button to read theme from default values in program.
  - CheckBox for loading custom themes at startup.
 
@@ -28,17 +28,16 @@ Provides:
 
 *//********************************************************************/
 
-#include "../Audacity.h"
+
 #include "ThemePrefs.h"
 
 #include <wx/app.h>
 #include <wx/wxprec.h>
-#include "../Prefs.h"
-#include "../Theme.h"
-#include "../ShuttleGui.h"
-#include "../AColor.h"
-
-wxDEFINE_EVENT(EVT_THEME_CHANGE, wxCommandEvent);
+#include "Prefs.h"
+#include "Theme.h"
+#include "ShuttleGui.h"
+#include "AColor.h"
+#include "BasicUI.h"
 
 enum eThemePrefsIds {
    idLoadThemeCache=7000,
@@ -72,17 +71,17 @@ ThemePrefs::~ThemePrefs(void)
 {
 }
 
-ComponentInterfaceSymbol ThemePrefs::GetSymbol()
+ComponentInterfaceSymbol ThemePrefs::GetSymbol() const
 {
    return THEME_PREFS_PLUGIN_SYMBOL;
 }
 
-TranslatableString ThemePrefs::GetDescription()
+TranslatableString ThemePrefs::GetDescription() const
 {
    return XO("Preferences for Theme");
 }
 
-wxString ThemePrefs::HelpPageName()
+ManualPageID ThemePrefs::HelpPageName()
 {
    return "Theme_Preferences";
 }
@@ -111,13 +110,13 @@ void ThemePrefs::PopulateOrExchange(ShuttleGui & S)
    {
       S.AddFixedText(
          XO(
-"Themability is an experimental feature.\n\nTo try it out, click \"Save Theme Cache\" then find and modify the images and colors in\nImageCacheVxx.png using an image editor such as the Gimp.\n\nClick \"Load Theme Cache\" to load the changed images and colors back into Audacity.\n\n(Only the Transport Toolbar and the colors on the wavetrack are currently affected, even\nthough the image file shows other icons too.)")
+"Themability is an experimental feature.\n\nTo try it out, click \"Save Theme Cache\" then find and modify the images and colors in\nImageCacheVxx.png using an image editor such as the Gimp.\n\nClick \"Load Theme Cache\" to load the changed images and colors back into Audacity.")
          );
 
 #ifdef _DEBUG
       S.AddFixedText(
          Verbatim(
-"This is a debug version of Audacity, with an extra button, 'Output Sourcery'. This will save a\nC version of the image cache that can be compiled in as a default.")
+"This is a debug version of Audacity, with an extra button, 'Output Sourcery'. This will save\nC versions of the image caches that can be compiled in as defaults.")
          );
 #endif
 
@@ -139,7 +138,7 @@ void ThemePrefs::PopulateOrExchange(ShuttleGui & S)
 
          // This next button is only provided in Debug mode.
          // It is for developers who are compiling Audacity themselves
-         // and who wish to generate a NEW ThemeAsCeeCode.h and compile it in.
+         // and who wish to generate NEW *ThemeAsCeeCode.h and compile them in.
 #ifdef _DEBUG
          S.Id(idSaveThemeAsCode).AddButton(Verbatim("Output Sourcery"));
 #endif
@@ -174,26 +173,30 @@ void ThemePrefs::PopulateOrExchange(ShuttleGui & S)
 /// Load Theme from multiple png files.
 void ThemePrefs::OnLoadThemeComponents(wxCommandEvent & WXUNUSED(event))
 {
-   theTheme.LoadComponents();
-   ApplyUpdatedImages();
+   wxBusyCursor busy;
+   theTheme.LoadThemeComponents();
+   AColor::ApplyUpdatedImages();
 }
 
 /// Save Theme to multiple png files.
 void ThemePrefs::OnSaveThemeComponents(wxCommandEvent & WXUNUSED(event))
 {
-   theTheme.SaveComponents();
+   wxBusyCursor busy;
+   theTheme.SaveThemeComponents();
 }
 
 /// Load Theme from single png file.
 void ThemePrefs::OnLoadThemeCache(wxCommandEvent & WXUNUSED(event))
 {
-   theTheme.ReadImageCache();
-   ApplyUpdatedImages();
+   wxBusyCursor busy;
+   theTheme.SwitchTheme({});
+   AColor::ApplyUpdatedImages();
 }
 
-/// Save Theme to single png file.
+/// Save Themes, each to a single png file.
 void ThemePrefs::OnSaveThemeCache(wxCommandEvent & WXUNUSED(event))
 {
+   wxBusyCursor busy;
    theTheme.CreateImageCache();
    theTheme.WriteImageMap();// bonus - give them the html version.
 }
@@ -201,23 +204,17 @@ void ThemePrefs::OnSaveThemeCache(wxCommandEvent & WXUNUSED(event))
 /// Read Theme from internal storage.
 void ThemePrefs::OnReadThemeInternal(wxCommandEvent & WXUNUSED(event))
 {
-   theTheme.ReadImageCache( theTheme.GetFallbackThemeType() );
-   ApplyUpdatedImages();
+   wxBusyCursor busy;
+   theTheme.SwitchTheme( theTheme.GetFallbackThemeType() );
+   AColor::ApplyUpdatedImages();
 }
 
 /// Save Theme as C source code.
 void ThemePrefs::OnSaveThemeAsCode(wxCommandEvent & WXUNUSED(event))
 {
+   wxBusyCursor busy;
    theTheme.SaveThemeAsCode();
    theTheme.WriteImageDefs();// bonus - give them the Defs too.
-}
-
-void ThemePrefs::ApplyUpdatedImages()
-{
-   AColor::ReInit();
-
-   wxCommandEvent e{ EVT_THEME_CHANGE };
-   wxTheApp->SafelyProcessEvent( e );
 }
 
 /// Update the preferences stored on disk.
@@ -226,7 +223,17 @@ bool ThemePrefs::Commit()
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
 
+   theTheme.LoadPreferredTheme();
+   theTheme.DeleteUnusedThemes();
+   AColor::ApplyUpdatedImages();
    return true;
+}
+
+void ThemePrefs::Cancel()
+{
+   theTheme.LoadPreferredTheme();
+   theTheme.DeleteUnusedThemes();
+   AColor::ApplyUpdatedImages();
 }
 
 #ifdef EXPERIMENTAL_THEME_PREFS

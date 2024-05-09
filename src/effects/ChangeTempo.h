@@ -11,7 +11,7 @@
 
 **********************************************************************/
 
-#include "../Audacity.h" // for USE_* macros
+
 #if USE_SOUNDTOUCH
 
 #ifndef __AUDACITY_EFFECT_CHANGETEMPO__
@@ -22,6 +22,8 @@
 #endif
 
 #include "SoundTouchEffect.h"
+#include "ShuttleAutomation.h"
+#include <wx/weakref.h>
 
 class wxSlider;
 class wxCheckBox;
@@ -31,6 +33,8 @@ class ShuttleGui;
 class EffectChangeTempo final : public EffectSoundTouch
 {
 public:
+   static inline EffectChangeTempo *
+   FetchParameters(EffectChangeTempo &e, EffectSettings &) { return &e; }
    static const ComponentInterfaceSymbol Symbol;
 
    EffectChangeTempo();
@@ -38,30 +42,27 @@ public:
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
-   wxString ManualPage() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+   ManualPageID ManualPage() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
-   bool SupportsAutomation() override;
-
-   // EffectClientInterface implementation
-
-   bool DefineParams( ShuttleParams & S ) override;
-   bool GetAutomationParameters(CommandParameters & parms) override;
-   bool SetAutomationParameters(CommandParameters & parms) override;
+   EffectType GetType() const override;
+   bool SupportsAutomation() const override;
 
    // Effect implementation
 
    bool Init() override;
-   bool CheckWhetherSkipEffect() override;
-   bool Process() override;
-   double CalcPreviewInputLength(double previewLength) override;
-   void PopulateOrExchange(ShuttleGui & S) override;
-   bool TransferDataToWindow() override;
-   bool TransferDataFromWindow() override;
+   bool CheckWhetherSkipEffect(const EffectSettings &settings) const override;
+   bool Process(EffectInstance &instance, EffectSettings &settings) override;
+   double CalcPreviewInputLength(
+      const EffectSettings &settings, double previewLength) const override;
+   std::unique_ptr<EffectEditor> PopulateOrExchange(
+      ShuttleGui & S, EffectInstance &instance,
+      EffectSettingsAccess &access, const EffectOutputs *pOutputs) override;
+   bool TransferDataToWindow(const EffectSettings &settings) override;
+   bool TransferDataFromWindow(EffectSettings &settings) override;
 
 private:
    // EffectChangeTempo implementation
@@ -80,6 +81,8 @@ private:
    void Update_Text_ToLength(); // Use m_FromLength & m_PercentChange to set NEW m_ToLength & control.
 
 private:
+   wxWeakRef<wxWindow> mUIParent{};
+
    bool           mUseSBSMS;
    double         m_PercentChange;  // percent change to apply to tempo
                                     // -100% is meaningless, but sky's the upper limit
@@ -102,7 +105,13 @@ private:
    wxCheckBox *   mUseSBSMSCheckBox;
 #endif
 
+   const EffectParameterMethods& Parameters() const override;
    DECLARE_EVENT_TABLE()
+
+static constexpr EffectParameter Percentage{ &EffectChangeTempo::m_PercentChange,
+   L"Percentage", 0.0,  -95.0,   3000.0,  1  };
+static constexpr EffectParameter UseSBSMS{ &EffectChangeTempo::mUseSBSMS,
+   L"SBSMS",     false, false,   true,    1  };
 };
 
 #endif // __AUDACITY_EFFECT_CHANGETEMPO__

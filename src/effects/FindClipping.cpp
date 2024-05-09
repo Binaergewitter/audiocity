@@ -17,29 +17,29 @@
 \brief FindClippingDialog used with EffectFindClipping
 
 *//*******************************************************************/
-
-
-#include "../Audacity.h"
 #include "FindClipping.h"
+#include "AnalysisTracks.h"
+#include "EffectEditor.h"
+#include "EffectOutputTracks.h"
 #include "LoadEffects.h"
 
 #include <math.h>
 
-#include <wx/intl.h>
 
-#include "../Shuttle.h"
-#include "../ShuttleGui.h"
+#include "ShuttleGui.h"
 #include "../widgets/valnum.h"
-#include "../widgets/AudacityMessageBox.h"
+#include "AudacityMessageBox.h"
 
 #include "../LabelTrack.h"
-#include "../WaveTrack.h"
+#include "WaveTrack.h"
 
-// Define keys, defaults, minimums, and maximums for the effect parameters
-//
-//     Name    Type  Key                     Def   Min   Max      Scale
-Param( Start,  int,  wxT("Duty Cycle Start"), 3,    1,    INT_MAX, 1   );
-Param( Stop,   int,  wxT("Duty Cycle End"),   3,    1,    INT_MAX, 1   );
+const EffectParameterMethods& EffectFindClipping::Parameters() const
+{
+   static CapturedParameters<EffectFindClipping,
+      Start, Stop
+   > parameters;
+   return parameters;
+}
 
 const ComponentInterfaceSymbol EffectFindClipping::Symbol
 { XO("Find Clipping") };
@@ -48,8 +48,7 @@ namespace{ BuiltinEffectsModule::Registration< EffectFindClipping > reg; }
 
 EffectFindClipping::EffectFindClipping()
 {
-   mStart = DEF_Start;
-   mStop = DEF_Stop;
+   Parameters().Reset(*this);
 }
 
 EffectFindClipping::~EffectFindClipping()
@@ -58,92 +57,65 @@ EffectFindClipping::~EffectFindClipping()
 
 // ComponentInterface implementation
 
-ComponentInterfaceSymbol EffectFindClipping::GetSymbol()
+ComponentInterfaceSymbol EffectFindClipping::GetSymbol() const
 {
    return Symbol;
 }
 
-TranslatableString EffectFindClipping::GetDescription()
+TranslatableString EffectFindClipping::GetDescription() const
 {
    return XO("Creates labels where clipping is detected");
 }
 
-wxString EffectFindClipping::ManualPage()
+ManualPageID EffectFindClipping::ManualPage() const
 {
-   return wxT("Find_Clipping");
+   return L"Find_Clipping";
 }
 
 // EffectDefinitionInterface implementation
 
-EffectType EffectFindClipping::GetType()
+EffectType EffectFindClipping::GetType() const
 {
    return EffectTypeAnalyze;
 }
 
-// EffectClientInterface implementation
-bool EffectFindClipping::DefineParams( ShuttleParams & S ){
-   S.SHUTTLE_PARAM( mStart, Start );
-   S.SHUTTLE_PARAM( mStop, Stop );
-   return true;
-}
-
-bool EffectFindClipping::GetAutomationParameters(CommandParameters & parms)
-{
-   parms.Write(KEY_Start, mStart);
-   parms.Write(KEY_Stop, mStop);
-
-   return true;
-}
-
-bool EffectFindClipping::SetAutomationParameters(CommandParameters & parms)
-{
-   ReadAndVerifyInt(Start);
-   ReadAndVerifyInt(Stop);
-
-   mStart = Start;
-   mStop = Stop;
-
-   return true;
-}
-
 // Effect implementation
 
-bool EffectFindClipping::Process()
+bool EffectFindClipping::Process(EffectInstance &, EffectSettings &)
 {
    std::shared_ptr<AddedAnalysisTrack> addedTrack;
-   Optional<ModifiedAnalysisTrack> modifiedTrack;
+   std::optional<ModifiedAnalysisTrack> modifiedTrack;
    const wxString name{ _("Clipping") };
 
-   auto clt = *inputTracks()->Any< const LabelTrack >().find_if(
-      [&]( const Track *track ){ return track->GetName() == name; } );
+   auto clt = *inputTracks()->Any<const LabelTrack>().find_if(
+      [&](const Track *track){ return track->GetName() == name; });
 
    LabelTrack *lt{};
    if (!clt)
-      addedTrack = (AddAnalysisTrack(name)), lt = addedTrack->get();
+      addedTrack = (AddAnalysisTrack(*this, name)), lt = addedTrack->get();
    else
-      modifiedTrack.emplace(ModifyAnalysisTrack(clt, name)),
+      modifiedTrack.emplace(ModifyAnalysisTrack(*this, *clt, name)),
       lt = modifiedTrack->get();
 
    int count = 0;
 
    // JC: Only process selected tracks.
-   for (auto t : inputTracks()->Selected< const WaveTrack >()) {
+   // PRL:  Compute the strech into temporary tracks.  Don't commit the stretch.
+   EffectOutputTracks temp { *mTracks, GetType(), { { mT0, mT1 } } };
+   for (auto t : temp.Get().Selected<const WaveTrack>()) {
       double trackStart = t->GetStartTime();
       double trackEnd = t->GetEndTime();
-      double t0 = mT0 < trackStart ? trackStart : mT0;
-      double t1 = mT1 > trackEnd ? trackEnd : mT1;
-
+      double t0 = std::max(trackStart, mT0);
+      double t1 = std::min(trackEnd, mT1);
       if (t1 > t0) {
          auto start = t->TimeToLongSamples(t0);
          auto end = t->TimeToLongSamples(t1);
          auto len = end - start;
 
-         if (!ProcessOne(lt, count, t, start, len)) {
-            return false;
-         }
+         for (const auto pChannel : t->Channels())
+            if (!ProcessOne(*lt, count++, *pChannel, start, len))
+               return false;
       }
-
-      count++;
    }
 
    // No cancellation, so commit the addition of the track.
@@ -154,18 +126,14 @@ bool EffectFindClipping::Process()
    return true;
 }
 
-bool EffectFindClipping::ProcessOne(LabelTrack * lt,
-                                    int count,
-                                    const WaveTrack * wt,
-                                    sampleCount start,
-                                    sampleCount len)
+bool EffectFindClipping::ProcessOne(LabelTrack &lt,
+   int count, const WaveChannel &wt, sampleCount start, sampleCount len)
 {
    bool bGoodResult = true;
    size_t blockSize = (mStart * 1000);
 
-   if (len < mStart) {
+   if (len < mStart)
       return true;
-   }
 
    Floats buffer;
    try {
@@ -177,7 +145,8 @@ bool EffectFindClipping::ProcessOne(LabelTrack * lt,
       buffer.reinit(blockSize);
    }
    catch( const std::bad_alloc & ) {
-      Effect::MessageBox( XO("Requested value exceeds memory capacity.") );
+      EffectUIServices::DoMessageBox(*this,
+         XO("Requested value exceeds memory capacity."));
       return false;
    }
 
@@ -189,28 +158,23 @@ bool EffectFindClipping::ProcessOne(LabelTrack * lt,
 
    while (s < len) {
       if (block == 0) {
-         if (TrackProgress(count,
-                           s.as_double() /
-                           len.as_double() )) {
+         if (TrackProgress(count, s.as_double() / len.as_double() )) {
             bGoodResult = false;
             break;
          }
-
          block = limitSampleBufferSize( blockSize, len - s );
-
-         wt->Get((samplePtr)buffer.get(), floatSample, start + s, block);
+         wt.GetFloats(buffer.get(), start + s, block);
          ptr = buffer.get();
       }
 
       float v = fabs(*ptr++);
       if (v >= MAX_AUDIO) {
          if (startrun == 0) {
-            startTime = wt->LongSamplesToTime(start + s);
+            startTime = wt.LongSamplesToTime(start + s);
             samps = 0;
          }
-         else {
+         else
             stoprun = 0;
-         }
          startrun++;
          samps++;
       }
@@ -218,52 +182,72 @@ bool EffectFindClipping::ProcessOne(LabelTrack * lt,
          if (startrun >= mStart) {
             stoprun++;
             samps++;
-
             if (stoprun >= mStop) {
-               lt->AddLabel(SelectedRegion(startTime,
-                                          wt->LongSamplesToTime(start + s - mStop)),
-                           wxString::Format(wxT("%lld of %lld"), startrun.as_long_long(), (samps - mStop).as_long_long()));
+               lt.AddLabel(
+                  SelectedRegion(startTime,
+                     wt.LongSamplesToTime(start + s - mStop)),
+                  /*!
+                   i18n-hint: Two numbers are substituted; the second is the
+                   size of a set, the first is the size of a subset, and not
+                   understood as an ordinal (i.e., not meaning "first", or
+                   "second", etc.)
+                   */
+                  XC("%lld of %lld", "find clipping")
+                     .Format(startrun.as_long_long(),
+                        (samps - mStop).as_long_long())
+                     .Translation());
                startrun = 0;
                stoprun = 0;
                samps = 0;
             }
          }
-         else {
+         else
             startrun = 0;
-         }
       }
-
       s++;
       block--;
    }
-
    return bGoodResult;
 }
 
-void EffectFindClipping::PopulateOrExchange(ShuttleGui & S)
+std::unique_ptr<EffectEditor> EffectFindClipping::PopulateOrExchange(
+   ShuttleGui & S, EffectInstance &, EffectSettingsAccess &access,
+   const EffectOutputs *)
 {
+   mUIParent = S.GetParent();
+   DoPopulateOrExchange(S, access);
+   return nullptr;
+}
+
+void EffectFindClipping::DoPopulateOrExchange(
+   ShuttleGui & S, EffectSettingsAccess &access)
+{
+   mpAccess = access.shared_from_this();
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.Validator<IntegerValidator<int>>(
-            &mStart, NumValidatorStyle::DEFAULT, MIN_Start)
+      S
+         .Validator<IntegerValidator<int>>(
+            &mStart, NumValidatorStyle::DEFAULT, Start.min)
          .TieTextBox(XXO("&Start threshold (samples):"), mStart, 10);
 
-      S.Validator<IntegerValidator<int>>(
-            &mStop, NumValidatorStyle::DEFAULT, MIN_Stop)
+      S
+         .Validator<IntegerValidator<int>>(
+            &mStop, NumValidatorStyle::DEFAULT, Stop.min)
          .TieTextBox(XXO("St&op threshold (samples):"), mStop, 10);
    }
    S.EndMultiColumn();
 }
 
-bool EffectFindClipping::TransferDataToWindow()
+bool EffectFindClipping::TransferDataToWindow(const EffectSettings &)
 {
    ShuttleGui S(mUIParent, eIsSettingToDialog);
-   PopulateOrExchange(S);
+   // To do: eliminate this and just use validators for controls
+   DoPopulateOrExchange(S, *mpAccess);
 
    return true;
 }
 
-bool EffectFindClipping::TransferDataFromWindow()
+bool EffectFindClipping::TransferDataFromWindow(EffectSettings &)
 {
    if (!mUIParent->Validate())
    {
@@ -271,7 +255,8 @@ bool EffectFindClipping::TransferDataFromWindow()
    }
 
    ShuttleGui S(mUIParent, eIsGettingFromDialog);
-   PopulateOrExchange(S);
+   // To do: eliminate this and just use validators for controls
+   DoPopulateOrExchange(S, *mpAccess);
 
    return true;
 }

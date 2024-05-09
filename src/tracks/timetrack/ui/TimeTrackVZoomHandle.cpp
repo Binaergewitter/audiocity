@@ -8,18 +8,17 @@ Paul Licameli split from TimeTrackVZoomHandle.cpp
 
 **********************************************************************/
 
-#include "../../../Audacity.h"
+
 #include "TimeTrackVZoomHandle.h"
-#include "TimeTrackVRulerControls.h"
 #include "TimeTrackControls.h"
 
 #include "../../../HitTestResult.h"
-#include "../../../NumberScale.h"
-#include "../../../Prefs.h"
-#include "../../../ProjectHistory.h"
+#include "NumberScale.h"
+#include "Prefs.h"
+#include "ProjectHistory.h"
 #include "../../../RefreshCode.h"
 #include "../../../TrackPanelMouseEvent.h"
-#include "../../../TimeTrack.h"
+#include "TimeTrack.h"
 
 TimeTrackVZoomHandle::TimeTrackVZoomHandle(
    const std::shared_ptr<TimeTrack> &pTrack, const wxRect &rect, int y)
@@ -29,11 +28,21 @@ TimeTrackVZoomHandle::TimeTrackVZoomHandle(
 
 TimeTrackVZoomHandle::~TimeTrackVZoomHandle() = default;
 
+std::shared_ptr<const Track> TimeTrackVZoomHandle::FindTrack() const
+{
+   return mpTrack.lock();
+}
+
 void TimeTrackVZoomHandle::Enter( bool, AudacityProject* )
 {
 #ifdef EXPERIMENTAL_TRACK_PANEL_HIGHLIGHTING
    mChangeHighlight = RefreshCode::RefreshCell;
 #endif
+}
+
+bool TimeTrackVZoomHandle::HandlesRightClick()
+{
+   return true;
 }
 
 UIHandle::Result TimeTrackVZoomHandle::Click
@@ -83,11 +92,12 @@ UIHandle::Result TimeTrackVZoomHandle::Release
        !(event.ShiftDown() || event.CmdDown()))
    {
       CommonTrackControls::InitMenuData data {
-         *pProject, pTrack.get(), pParent, RefreshNone
+         *pProject, *pTrack, pParent, RefreshNone
       };
 
-      auto pMenu = PopupMenuTable::BuildMenu(pParent, &TimeTrackMenuTable::Instance(), &data);
-      pParent->PopupMenu(pMenu.get(), event.m_x, event.m_y);
+      auto pMenu = PopupMenuTable::BuildMenu(
+         &TimeTrackMenuTable::Instance(), &data);
+      pMenu->Popup( *pParent, { event.m_x, event.m_y } );
    }
 
    return UpdateVRuler | RefreshAll;

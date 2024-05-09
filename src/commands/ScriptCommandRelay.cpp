@@ -23,17 +23,17 @@ code out of ModuleManager.
 
 #include "CommandTargets.h"
 #include "CommandBuilder.h"
+#include "ActiveProject.h"
 #include "AppCommandEvent.h"
-#include "../Project.h"
+#include "Project.h"
 #include <wx/app.h>
-#include <wx/string.h>
 #include <thread>
 
 /// This is the function which actually obeys one command.
 static int ExecCommand(wxString *pIn, wxString *pOut, bool fromMain)
 {
-   {
-      CommandBuilder builder(::GetActiveProject(), *pIn);
+   if (auto pProject = ::GetActiveProject().lock()) {
+      CommandBuilder builder(*pProject, *pIn);
       if (builder.WasValid())
       {
          OldStyleCommandPointer cmd = builder.GetCommand();
@@ -57,6 +57,8 @@ static int ExecCommand(wxString *pIn, wxString *pOut, bool fromMain)
       // Wait for and retrieve the response
       *pOut = builder.GetResponse();
    }
+   else
+      *pOut = wxString{};
 
    return 0;
 }
@@ -89,6 +91,7 @@ void ScriptCommandRelay::StartScriptServer(tpRegScriptServerFunc scriptFn)
    std::thread(server, scriptFn).detach();
 }
 
+#if USE_NYQUIST
 void * ExecForLisp( char * pIn )
 {
    wxString Str1(pIn);
@@ -98,3 +101,4 @@ void * ExecForLisp( char * pIn )
 
    return nyq_reformat_aud_do_response(Str2);
 }
+#endif

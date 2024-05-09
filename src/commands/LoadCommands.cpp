@@ -13,18 +13,20 @@
 modelled on BuiltinEffectsModule
 *****************************************************************************/
 
-#include "../Audacity.h"
+
 #include "LoadCommands.h"
 #include "AudacityCommand.h"
+#include "ModuleManager.h"
+#include "PluginInterface.h"
 
-#include "../Prefs.h"
+#include "Prefs.h"
 
 namespace {
 bool sInitialized = false;
 }
 
 struct BuiltinCommandsModule::Entry {
-   wxString name;
+   ComponentInterfaceSymbol name;
    Factory factory;
 
    using Entries = std::vector< Entry >;
@@ -39,7 +41,7 @@ void BuiltinCommandsModule::DoRegistration(
    const ComponentInterfaceSymbol &name, const Factory &factory )
 {
    wxASSERT( !sInitialized );
-   Entry::Registry().emplace_back( Entry{ name.Internal(), factory } );
+   Entry::Registry().emplace_back( Entry{ name, factory } );
 }
 
 // ============================================================================
@@ -51,17 +53,17 @@ void BuiltinCommandsModule::DoRegistration(
 // When the module is builtin to Audacity, we use the same function, but it is
 // declared static so as not to clash with other builtin modules.
 // ============================================================================
-DECLARE_MODULE_ENTRY(AudacityModule)
+DECLARE_PROVIDER_ENTRY(AudacityModule)
 {
    // Create and register the importer
    // Trust the module manager not to leak this
-   return safenew BuiltinCommandsModule(path);
+   return std::make_unique<BuiltinCommandsModule>();
 }
 
 // ============================================================================
 // Register this as a builtin module
 // ============================================================================
-DECLARE_BUILTIN_MODULE(BuiltinsCommandBuiltin);
+DECLARE_BUILTIN_PROVIDER(BuiltinsCommandBuiltin);
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -69,57 +71,53 @@ DECLARE_BUILTIN_MODULE(BuiltinsCommandBuiltin);
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-BuiltinCommandsModule::BuiltinCommandsModule(const wxString *path)
+BuiltinCommandsModule::BuiltinCommandsModule()
 {
-   if (path)
-   {
-      mPath = *path;
-   }
 }
 
 BuiltinCommandsModule::~BuiltinCommandsModule()
 {
-   mPath.clear();
 }
 
 // ============================================================================
 // ComponentInterface implementation
 // ============================================================================
 
-PluginPath BuiltinCommandsModule::GetPath()
+PluginPath BuiltinCommandsModule::GetPath() const
 {
-   return mPath;
+   return {};
 }
 
-ComponentInterfaceSymbol BuiltinCommandsModule::GetSymbol()
+ComponentInterfaceSymbol BuiltinCommandsModule::GetSymbol() const
 {
    return XO("Builtin Commands");
 }
 
-VendorSymbol BuiltinCommandsModule::GetVendor()
+VendorSymbol BuiltinCommandsModule::GetVendor() const
 {
    return XO("The Audacity Team");
 }
 
-wxString BuiltinCommandsModule::GetVersion()
+wxString BuiltinCommandsModule::GetVersion() const
 {
    // This "may" be different if this were to be maintained as a separate DLL
    return AUDACITY_VERSION_STRING;
 }
 
-TranslatableString BuiltinCommandsModule::GetDescription()
+TranslatableString BuiltinCommandsModule::GetDescription() const
 {
    return XO("Provides builtin commands to Audacity");
 }
 
 // ============================================================================
-// ModuleInterface implementation
+// PluginProvider implementation
 // ============================================================================
 
 bool BuiltinCommandsModule::Initialize()
 {
    for ( const auto &entry : Entry::Registry() ) {
-      auto path = wxString(BUILTIN_GENERIC_COMMAND_PREFIX) + entry.name;
+      auto path = wxString(BUILTIN_GENERIC_COMMAND_PREFIX)
+         + entry.name.Internal();
       mCommands[ path ] = &entry;
    }
    sInitialized = true;
@@ -144,13 +142,13 @@ const FileExtensions &BuiltinCommandsModule::GetFileExtensions()
    return empty;
 }
 
-bool BuiltinCommandsModule::AutoRegisterPlugins(PluginManagerInterface & pm)
+void BuiltinCommandsModule::AutoRegisterPlugins(PluginManagerInterface & pm)
 {
    TranslatableString ignoredErrMsg;
    for (const auto &pair : mCommands)
    {
       const auto &path = pair.first;
-      if (!pm.IsPluginRegistered(path))
+      if (!pm.IsPluginRegistered(path, &pair.second->name.Msgid()))
       {
          // No checking of error ?
          // Uses Generic Registration, not Default.
@@ -159,13 +157,11 @@ bool BuiltinCommandsModule::AutoRegisterPlugins(PluginManagerInterface & pm)
             PluginManagerInterface::AudacityCommandRegistrationCallback);
       }
    }
-
-   // We still want to be called during the normal registration process
-   return false;
 }
 
-PluginPaths BuiltinCommandsModule::FindPluginPaths(PluginManagerInterface & WXUNUSED(pm))
+PluginPaths BuiltinCommandsModule::FindModulePaths(PluginManagerInterface &)
 {
+   // Not really libraries
    PluginPaths names;
    for ( const auto &pair : mCommands )
       names.push_back( pair.first );
@@ -176,6 +172,7 @@ unsigned BuiltinCommandsModule::DiscoverPluginsAtPath(
    const PluginPath & path, TranslatableString &errMsg,
    const RegistrationCallback &callback)
 {
+   // At most one
    errMsg = {};
    auto Command = Instantiate(path);
    if (Command)
@@ -190,26 +187,16 @@ unsigned BuiltinCommandsModule::DiscoverPluginsAtPath(
    return 0;
 }
 
-bool BuiltinCommandsModule::IsPluginValid(const PluginPath & path, bool bFast)
-{
-   // bFast is unused as checking in the list is fast.
-   static_cast<void>(bFast); // avoid unused variable warning
-   return mCommands.find( path ) != mCommands.end();
-}
-
-ComponentInterface *BuiltinCommandsModule::CreateInstance(const PluginPath & path)
+std::unique_ptr<ComponentInterface>
+BuiltinCommandsModule::LoadPlugin(const PluginPath & path)
 {
    // Acquires a resource for the application.
-   // Safety of this depends on complementary calls to DeleteInstance on the module manager side.
-   return Instantiate(path).release();
+   return Instantiate(path);
 }
 
-void BuiltinCommandsModule::DeleteInstance(ComponentInterface *instance)
+bool BuiltinCommandsModule::CheckPluginExist(const PluginPath& path) const
 {
-   // Releases the resource.
-   std::unique_ptr < AudacityCommand > {
-      dynamic_cast<AudacityCommand *>(instance)
-   };
+   return mCommands.find( path ) != mCommands.end();
 }
 
 // ============================================================================

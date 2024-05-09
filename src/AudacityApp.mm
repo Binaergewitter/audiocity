@@ -25,4 +25,37 @@ void AudacityApp::MacFinishLaunching()
    [NSApp finishLaunching];
 }
 
+void AudacityApp::OnThemeChange(ThemeChangeMessage message)
+{
+   if (!message.appearance)
+      return;
+
+   // This API only works 10.14+
+   // Previous versions will always use Light appearance
+#if defined(__MAC_10_14) && defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= __MAC_10_14
+   if (@available(macOS 10.14, *))
+   {
+      NSAppearanceName appearanceName;
+
+      switch (*message.appearance)
+      {
+         case PreferredSystemAppearance::Light:
+            appearanceName = NSAppearanceNameAqua;
+            break;
+         case PreferredSystemAppearance::Dark:
+            appearanceName = NSAppearanceNameDarkAqua;
+            break;
+         case PreferredSystemAppearance::HighContrastDark:
+            appearanceName = NSAppearanceNameAccessibilityHighContrastDarkAqua;
+            break;
+      }
+
+      NSAppearance* systemAppearance = [NSAppearance appearanceNamed:appearanceName];
+
+      if (systemAppearance != nil)
+         NSApp.appearance = systemAppearance;
+   }
+#endif
+}
+
 #endif

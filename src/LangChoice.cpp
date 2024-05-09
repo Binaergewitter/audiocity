@@ -13,22 +13,17 @@
 of languages for Audacity.
 
 *//*******************************************************************/
-
-
-#include "Audacity.h"
 #include "LangChoice.h"
+#include "IteratorX.h"
 
 #include <wx/defs.h>
-#include <wx/button.h>
 #include <wx/choice.h>
-#include <wx/intl.h>
-#include <wx/sizer.h>
 #include <wx/stattext.h>
 
 #include "Languages.h"
 #include "ShuttleGui.h"
-#include "widgets/AudacityMessageBox.h"
-#include "widgets/wxPanelWrapper.h"
+#include "AudacityMessageBox.h"
+#include "wxPanelWrapper.h"
 
 class LangChoiceDialog final : public wxDialogWrapper {
 public:
@@ -75,9 +70,10 @@ LangChoiceDialog::LangChoiceDialog(wxWindow * parent,
    wxDialogWrapper(parent, id, title)
 {
    SetName();
-   GetLanguages(mLangCodes, mLangNames);
-   int lang =
-      make_iterator_range( mLangCodes ).index( GetSystemLanguageCode() );
+   const auto &paths = FileNames::AudacityPathList();
+   Languages::GetLanguages(paths, mLangCodes, mLangNames);
+   int lang = make_iterator_range( mLangCodes )
+      .index( Languages::GetSystemLanguageCode(paths) );
 
    ShuttleGui S(this, eIsCreating);
 
@@ -105,7 +101,8 @@ void LangChoiceDialog::OnOk(wxCommandEvent & WXUNUSED(event))
    int ndx = mChoice->GetSelection();
    mLang = mLangCodes[ndx];
 
-   wxString slang = GetSystemLanguageCode();
+   auto slang =
+      Languages::GetSystemLanguageCode(FileNames::AudacityPathList());
    int sndx = make_iterator_range( mLangCodes ).index( slang );
    wxString sname;
 

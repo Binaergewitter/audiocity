@@ -24,7 +24,7 @@ in which buttons can be placed.
 
 *//**********************************************************************/
 
-#include "../Audacity.h" // for USE_* macros
+
 #include "ToolBar.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
@@ -36,8 +36,6 @@ in which buttons can be placed.
 #include <wx/dcclient.h>
 #include <wx/defs.h>
 #include <wx/gdicmn.h>
-#include <wx/image.h>
-#include <wx/intl.h>
 #include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/sysopt.h>
@@ -46,14 +44,14 @@ in which buttons can be placed.
 
 #include "ToolDock.h"
 
-#include "../AllThemeResources.h"
-#include "../AColor.h"
-#include "../ImageManipulation.h"
-#include "../Project.h"
-#include "../commands/CommandManager.h"
+#include "AllThemeResources.h"
+#include "AColor.h"
+#include "ImageManipulation.h"
+#include "Project.h"
+#include "CommandManager.h"
 #include "../widgets/AButton.h"
 #include "../widgets/Grabber.h"
-#include "../Prefs.h"
+#include "Prefs.h"
 
 ////////////////////////////////////////////////////////////
 /// ToolBarResizer
@@ -328,15 +326,13 @@ END_EVENT_TABLE()
 // Constructor
 //
 ToolBar::ToolBar( AudacityProject &project,
-                  int type,
                   const TranslatableString &label,
-                  const wxString &section,
+                  const Identifier &section,
                   bool resizable )
 : wxPanelWrapper()
 , mProject{ project }
 {
    // Save parameters
-   mType = type;
    mLabel = label;
    mSection = section;
    mResizable = resizable;
@@ -349,7 +345,6 @@ ToolBar::ToolBar( AudacityProject &project,
 
    mGrabber = NULL;
    mResizer = NULL;
-   SetId(mType);
 }
 
 //
@@ -357,6 +352,29 @@ ToolBar::ToolBar( AudacityProject &project,
 //
 ToolBar::~ToolBar()
 {
+}
+
+bool ToolBar::AcceptsFocusFromKeyboard() const
+{
+   for(auto& child : GetChildren())
+      if(child->AcceptsFocusFromKeyboard())
+         return true;
+   return false;
+}
+
+bool ToolBar::ShownByDefault() const
+{
+   return true;
+}
+
+bool ToolBar::HideAfterReset() const
+{
+   return false;
+}
+
+ToolBar::DockID ToolBar::DefaultDockID() const
+{
+   return TopDockID;
 }
 
 //
@@ -379,17 +397,9 @@ TranslatableString ToolBar::GetLabel()
 //
 // Returns the toolbar preferences section
 //
-wxString ToolBar::GetSection()
+Identifier ToolBar::GetSection()
 {
    return mSection;
-}
-
-//
-// Returns the toolbar type
-//
-int ToolBar::GetType()
-{
-   return mType;
 }
 
 //
@@ -438,6 +448,11 @@ void ToolBar::SetVisible( bool bVisible )
    mVisible = bVisible;
 }
 
+std::pair<Identifier, Identifier> ToolBar::PreferredNeighbors() const noexcept
+{
+   return { mPreferredLeftNeighbor, mPreferredTopNeighbor };
+}
+
 //
 // Show or hide the toolbar
 //
@@ -461,7 +476,9 @@ bool ToolBar::Expose( bool show )
       if( !IsPositioned() && show ){
          SetPositioned();
          pParent->CentreOnParent();
-         pParent->Move( pParent->GetPosition() + wxSize( mType*10, mType*10 ));
+         // Cascade the undocked bars
+         pParent->Move( pParent->GetPosition() +
+            wxSize{ mIndex * 10, mIndex * 10 });
       }
       pParent->Show( show );
    }
@@ -479,7 +496,7 @@ void ToolBar::Create( wxWindow *parent )
 
    // Create the window and label it
    wxPanelWrapper::Create( mParent,
-                    mType,
+                    wxID_ANY,
                     wxDefaultPosition,
                     wxDefaultSize,
                     wxNO_BORDER | wxTAB_TRAVERSAL,
@@ -539,7 +556,7 @@ void ToolBar::ReCreateButtons()
       auto ms = std::make_unique<wxBoxSizer>(wxHORIZONTAL);
 
       // Create the grabber and add it to the main sizer
-      mGrabber = safenew Grabber(this, mType);
+      mGrabber = safenew Grabber(this, GetSection());
       ms->Add(mGrabber, 0, wxEXPAND | wxALIGN_LEFT | wxALIGN_TOP | wxRIGHT, 1);
 
       // Use a box sizer for laying out controls
@@ -630,6 +647,12 @@ void ToolBar::UpdatePrefs()
 ToolDock *ToolBar::GetDock()
 {
    return dynamic_cast<ToolDock*>(GetParent());
+}
+
+void ToolBar::SetPreferredNeighbors(Identifier left, Identifier top)
+{
+   mPreferredLeftNeighbor = left;
+   mPreferredTopNeighbor = top;
 }
 
 //
@@ -762,15 +785,27 @@ void ToolBar::Detach( wxSizer *sizer )
    mHSizer->Detach( sizer );
 }
 
-void ToolBar::MakeMacRecoloredImage(teBmps eBmpOut, teBmps eBmpIn )
+void ToolBar::MakeMacRecoloredImage( teBmps eBmpOut, teBmps eBmpIn )
 {
    theTheme.ReplaceImage( eBmpOut, &theTheme.Image( eBmpIn ));
+}
+
+void ToolBar::MakeMacRecoloredImageSize(teBmps eBmpOut, teBmps eBmpIn, const wxSize& size)
+{
+   MakeMacRecoloredImage( eBmpOut, eBmpIn );
+   theTheme.Image( eBmpOut ).Rescale( size.GetWidth(), size.GetHeight() );
 }
 
 void ToolBar::MakeRecoloredImage( teBmps eBmpOut, teBmps eBmpIn )
 {
    // Don't recolour the buttons...
    MakeMacRecoloredImage( eBmpOut, eBmpIn );
+}
+
+void ToolBar::MakeRecoloredImageSize(teBmps eBmpOut, teBmps eBmpIn, const wxSize& size)
+{
+   MakeRecoloredImage( eBmpOut, eBmpIn );
+   theTheme.Image( eBmpOut ).Rescale( size.GetWidth(), size.GetHeight() );
 }
 
 void ToolBar:: MakeButtonBackgroundsLarge()
@@ -869,6 +904,43 @@ AButton * ToolBar::MakeButton(wxWindow *parent,
    return button;
 }
 
+// This is a convenience function that allows for button creation in
+// MakeButtons() with fewer arguments
+/// @param parent            Parent window for the button.
+/// @param eEnabledUp        Background for when button is Up.
+/// @param eEnabledDown      Background for when button is Down.
+/// @param eDisabled         Foreground when disabled.
+/// @param id                Windows Id.
+/// @param processdownevents true iff button handles down events.
+/// @param label             Button label
+AButton * ToolBar::MakeButton(ToolBar *parent,
+                              teBmps eEnabledUp,
+                              teBmps eEnabledDown,
+                              teBmps eDisabled,
+                              int id,
+                              bool processdownevents,
+                              const TranslatableString &label)
+{
+   AButton *r = ToolBar::MakeButton(parent,
+      bmpRecoloredUpLarge, bmpRecoloredDownLarge, bmpRecoloredUpHiliteLarge, bmpRecoloredHiliteLarge,
+      eEnabledUp, eEnabledDown, eDisabled,
+      wxWindowID( id ),
+      wxDefaultPosition, processdownevents,
+      theTheme.ImageSize( bmpRecoloredUpLarge ));
+   r->SetLabel( label );
+   enum {
+      deflation =
+#ifdef __WXMAC__
+      6
+#else
+      12
+#endif
+   };
+   r->SetFocusRect( r->GetClientRect().Deflate( deflation, deflation ) );
+
+   return r;
+}
+
 //static
 void ToolBar::MakeAlternateImages(AButton &button, int idx,
                                   teBmps eUp,
@@ -961,17 +1033,15 @@ namespace {
 
 RegisteredToolbarFactory::Functions &GetFunctions()
 {
-   static RegisteredToolbarFactory::Functions factories( ToolBarCount );
+   static RegisteredToolbarFactory::Functions factories;
    return factories;
 }
 
 }
 
-RegisteredToolbarFactory::RegisteredToolbarFactory(
-   int id, const Function &function)
+RegisteredToolbarFactory::RegisteredToolbarFactory(const Function &function)
 {
-   wxASSERT( id >= 0 && id < ToolBarCount );
-   GetFunctions()[ id ] = function;
+   GetFunctions().emplace_back(function);
 }
 
 auto RegisteredToolbarFactory::GetFactories() -> const Functions&

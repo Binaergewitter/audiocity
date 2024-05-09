@@ -13,17 +13,17 @@ Paul Licameli
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
-#include "WaveformSettings.h"
 
-#include "GUISettings.h"
+#include "WaveformSettings.h"
+#include "WaveTrack.h"
+
+#include "Decibels.h"
 #include "GUIPrefs.h"
 #include "TracksPrefs.h"
 
 #include <algorithm>
-#include <wx/intl.h>
 
-#include "../Prefs.h"
+#include "Prefs.h"
 
 
 WaveformSettings::Globals::Globals()
@@ -44,6 +44,27 @@ WaveformSettings::Globals
 {
    static Globals instance;
    return instance;
+}
+
+static const ChannelGroup::Attachments::RegisteredFactory
+key1{ [](auto &) {
+   return std::make_unique<WaveformSettings>(WaveformSettings::defaults()); } };
+
+WaveformSettings &WaveformSettings::Get(const WaveTrack &track)
+{
+   auto &mutTrack = const_cast<WaveTrack&>(track);
+   return mutTrack.Attachments::Get<WaveformSettings>(key1);
+}
+
+WaveformSettings &WaveformSettings::Get(const WaveChannel &channel)
+{
+   return Get(channel.GetTrack());
+}
+
+void WaveformSettings::Set(
+   WaveChannel &channel, std::unique_ptr<WaveformSettings> pSettings)
+{
+   channel.GetTrack().Attachments::Assign(key1, move(pSettings));
 }
 
 WaveformSettings::WaveformSettings()
@@ -88,7 +109,7 @@ void WaveformSettings::LoadPrefs()
 {
    scaleType = TracksPrefs::WaveformScaleChoice();
 
-   dBRange = gPrefs->Read(ENV_DB_KEY, ENV_DB_RANGE);
+   dBRange = DecibelScaleCutoff.Read();
 
    // Enforce legal values
    Validate(true);
@@ -112,7 +133,7 @@ void WaveformSettings::UpdatePrefs()
    }
 
    if (dBRange == defaults().dBRange){
-      dBRange = gPrefs->Read(ENV_DB_KEY, ENV_DB_RANGE);
+      dBRange = DecibelScaleCutoff.Read();
    }
 
    // Enforce legal values
@@ -163,12 +184,45 @@ const EnumValueSymbols &WaveformSettings::GetScaleNames()
 {
    static const EnumValueSymbols result{
       // Keep in correspondence with ScaleTypeValues:
-      XO("Linear"),
-      XO("dB"),
+      { wxT("Linear"), XO("Linear (amp)") },
+      { wxT("dB"), XO("Logarithmic (dB)") },
+      { wxT("LinearDB"), XO("Linear (dB)") },
    };
    return result;
 }
 
 WaveformSettings::~WaveformSettings()
 {
+}
+
+auto WaveformSettings::Clone() const -> PointerType
+{
+   return std::make_unique<WaveformSettings>(*this);
+}
+
+static const ChannelGroup::Attachments::RegisteredFactory
+key2{ [](auto &) { return std::make_unique<WaveformScale>(); } };
+
+WaveformScale &WaveformScale::Get(const WaveTrack &track)
+{
+   auto &mutTrack = const_cast<WaveTrack&>(track);
+   return mutTrack.Attachments::Get<WaveformScale>(key2);
+}
+
+WaveformScale &WaveformScale::Get(const WaveChannel &channel)
+{
+   return Get(channel.GetTrack());
+}
+
+WaveformScale::~WaveformScale() = default;
+
+auto WaveformScale::Clone() const -> PointerType
+{
+   return std::make_unique<WaveformScale>(*this);
+}
+
+int WaveformScale::ZeroLevelYCoordinate(wxRect rect) const
+{
+   return rect.GetTop() +
+      (int)((mDisplayMax / (mDisplayMax - mDisplayMin)) * rect.height);
 }

@@ -6,28 +6,30 @@
  
  *//*******************************************************************/
 
-#include "Audacity.h"
+
 #include "CrashReport.h"
 
 #if defined(HAS_CRASH_REPORT)
 #include <atomic>
 #include <thread>
 
-#include <wx/progdlg.h>
-
 #if defined(__WXMSW__)
 #include <wx/evtloop.h>
 #endif
 
 #include "wxFileNameWrapper.h"
+#include "ActiveProject.h"
 #include "AudacityLogger.h"
 #include "AudioIOBase.h"
+#include "AudioIOExt.h"
+#include "BasicUI.h"
 #include "FileNames.h"
 #include "Internat.h"
+#include "Languages.h"
 #include "Project.h"
 #include "ProjectFileIO.h"
-#include "prefs/GUIPrefs.h"
-#include "widgets/ErrorDialog.h"
+#include "prefs/GUISettings.h"
+#include "AudacityTextEntryDialog.h"
 
 namespace CrashReport {
 
@@ -43,34 +45,34 @@ void Generate(wxDebugReport::Context ctx)
 
    {
       // Provides a progress dialog with indeterminate mode
-      wxGenericProgressDialog pd(XO("Audacity Support Data").Translation(),
-                                 XO("This may take several seconds").Translation(),
-                                 300000,     // range
-                                 nullptr,    // parent
-                                 wxPD_APP_MODAL | wxPD_ELAPSED_TIME | wxPD_SMOOTH);
+      using namespace BasicUI;
+      auto pd = MakeGenericProgress({},
+         XO("Audacity Support Data"), XO("This may take several seconds"));
+      wxASSERT(pd);
 
       std::atomic_bool done = {false};
       auto thread = std::thread([&]
       {
-         wxFileNameWrapper fn{ FileNames::DataDir(), wxT("audacity.cfg") };
+         wxFileNameWrapper fn{ FileNames::Configuration() };
          rpt.AddFile(fn.GetFullPath(), _TS("Audacity Configuration"));
          rpt.AddFile(FileNames::PluginRegistry(), wxT("Plugin Registry"));
          rpt.AddFile(FileNames::PluginSettings(), wxT("Plugin Settings"));
    
          if (ctx == wxDebugReport::Context_Current)
          {
-            auto saveLang = GUIPrefs::GetLangShort();
-            GUIPrefs::InitLang( wxT("en") );
-            auto cleanup = finally( [&]{ GUIPrefs::InitLang( saveLang ); } );
+            auto saveLang = Languages::GetLangShort();
+            GUISettings::SetLang( wxT("en") );
+            auto cleanup = finally( [&]{ GUISettings::SetLang( saveLang ); } );
       
             auto gAudioIO = AudioIOBase::Get();
-            rpt.AddText(wxT("audiodev.txt"), gAudioIO->GetDeviceInfo(), wxT("Audio Device Info"));
-#ifdef EXPERIMENTAL_MIDI_OUT
-            rpt.AddText(wxT("mididev.txt"), gAudioIO->GetMidiDeviceInfo(), wxT("MIDI Device Info"));
-#endif
-            auto project = GetActiveProject();
-            auto &projectFileIO = ProjectFileIO::Get( *project );
-            rpt.AddText(wxT("project.txt"), projectFileIO.GenerateDoc(), wxT("Active project doc"));
+            for (const auto &diagnostics : gAudioIO->GetAllDeviceInfo())
+               rpt.AddText(
+                  diagnostics.filename, diagnostics.text, diagnostics.description);
+            auto project = GetActiveProject().lock();
+            if (project) {
+               auto &projectFileIO = ProjectFileIO::Get( *project );
+               rpt.AddText(wxT("project.txt"), projectFileIO.GenerateDoc(), wxT("Active project doc"));
+            }
          }
    
          auto logger = AudacityLogger::Get();
@@ -85,8 +87,9 @@ void Generate(wxDebugReport::Context ctx)
       // Wait for information to be gathered
       while (!done)
       {
-         wxMilliSleep(50);
-         pd.Pulse();
+         using namespace std::chrono;
+         std::this_thread::sleep_for(50ms);
+         pd->Pulse();
       }
       thread.join();
    }

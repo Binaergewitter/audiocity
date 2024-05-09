@@ -18,30 +18,31 @@
 \brief Dialog used with EffectRepeat
 
 *//*******************************************************************/
-
-
-#include "../Audacity.h"
 #include "Repeat.h"
-
+#include "EffectEditor.h"
+#include "EffectOutputTracks.h"
 
 #include <math.h>
 
-#include <wx/intl.h>
 #include <wx/stattext.h>
 
 #include "../LabelTrack.h"
-#include "../Shuttle.h"
-#include "../ShuttleGui.h"
-#include "../WaveTrack.h"
+#include "ShuttleGui.h"
+#include "SyncLock.h"
+#include "WaveClip.h"
+#include "WaveTrack.h"
 #include "../widgets/NumericTextCtrl.h"
 #include "../widgets/valnum.h"
 
 #include "LoadEffects.h"
 
-// Define keys, defaults, minimums, and maximums for the effect parameters
-//
-//     Name    Type  Key             Def  Min   Max      Scale
-Param( Count,  int,  wxT("Count"),    1,  1,    INT_MAX, 1  );
+const EffectParameterMethods& EffectRepeat::Parameters() const
+{
+   static CapturedParameters<EffectRepeat,
+      Count
+   > parameters;
+   return parameters;
+}
 
 const ComponentInterfaceSymbol EffectRepeat::Symbol
 { XO("Repeat") };
@@ -54,8 +55,7 @@ END_EVENT_TABLE()
 
 EffectRepeat::EffectRepeat()
 {
-   repeatCount = DEF_Count;
-
+   Parameters().Reset(*this);
    SetLinearEffectFlag(true);
 }
 
@@ -65,103 +65,116 @@ EffectRepeat::~EffectRepeat()
 
 // ComponentInterface implementation
 
-ComponentInterfaceSymbol EffectRepeat::GetSymbol()
+ComponentInterfaceSymbol EffectRepeat::GetSymbol() const
 {
    return Symbol;
 }
 
-TranslatableString EffectRepeat::GetDescription()
+TranslatableString EffectRepeat::GetDescription() const
 {
    return XO("Repeats the selection the specified number of times");
 }
 
-wxString EffectRepeat::ManualPage()
+ManualPageID EffectRepeat::ManualPage() const
 {
-   return wxT("Repeat");
+   return L"Repeat";
 }
 
 // EffectDefinitionInterface implementation
 
-EffectType EffectRepeat::GetType()
+EffectType EffectRepeat::GetType() const
 {
    return EffectTypeProcess;
 }
 
-// EffectClientInterface implementation
-bool EffectRepeat::DefineParams( ShuttleParams & S ){
-   S.SHUTTLE_PARAM( repeatCount, Count );
-   return true;
-}
-
-bool EffectRepeat::GetAutomationParameters(CommandParameters & parms)
-{
-   parms.Write(KEY_Count, repeatCount);
-
-   return true;
-}
-
-bool EffectRepeat::SetAutomationParameters(CommandParameters & parms)
-{
-   ReadAndVerifyInt(Count);
-
-   repeatCount = Count;
-
-   return true;
-}
-
 // Effect implementation
 
-bool EffectRepeat::Process()
+bool EffectRepeat::Process(EffectInstance &, EffectSettings &)
 {
    // Set up mOutputTracks.
    // This effect needs all for sync-lock grouping.
-   CopyInputTracks(true);
+   EffectOutputTracks outputs { *mTracks, GetType(), { { mT0, mT1 } }, true };
 
    int nTrack = 0;
    bool bGoodResult = true;
    double maxDestLen = 0.0; // used to change selection to generated bit
 
-   mOutputTracks->Any().VisitWhile( bGoodResult,
-      [&](LabelTrack *track)
-      {
-         if (track->GetSelected() || track->IsSyncLockSelected())
+   outputs.Get().Any().VisitWhile(bGoodResult,
+      [&](LabelTrack &track) {
+         if (SyncLock::IsSelectedOrSyncLockSelected(track))
          {
-            if (!track->Repeat(mT0, mT1, repeatCount))
+            if (!track.Repeat(mT0, mT1, repeatCount))
                bGoodResult = false;
          }
       },
-      [&](WaveTrack *track, const Track::Fallthrough &fallthrough)
-      {
-         if (!track->GetSelected())
+      [&](auto &&fallthrough){ return [&](WaveTrack &track) {
+         if (!track.GetSelected())
             return fallthrough(); // Fall through to next lambda
-         auto start = track->TimeToLongSamples(mT0);
-         auto end = track->TimeToLongSamples(mT1);
+         auto start = track.TimeToLongSamples(mT0);
+         auto end = track.TimeToLongSamples(mT1);
          auto len = end - start;
-         double tLen = track->LongSamplesToTime(len);
-         double tc = mT0 + tLen;
+         const double tLen = track.LongSamplesToTime(len);
+         const double tc = mT0 + tLen;
 
          if (len <= 0)
             return;
 
-         auto dest = track->Copy(mT0, mT1);
-         for(int j=0; j<repeatCount; j++)
-         {
-            if (TrackProgress(nTrack, j / repeatCount)) // TrackProgress returns true on Cancel.
-            {
+         auto firstTemp =
+            std::static_pointer_cast<WaveTrack>(track.Copy(mT0, mT1));
+
+         auto t0 = tc;
+         for (size_t j = 0; j < repeatCount; ++j) {
+            if (TrackProgress(nTrack, j / repeatCount)) {
+               // TrackProgress returns true on Cancel.
                bGoodResult = false;
                return;
             }
-            track->Paste(tc, dest.get());
-            tc += tLen;
+            track.Paste(t0, *firstTemp);
+            t0 += tLen;
          }
-         if (tc > maxDestLen)
-            maxDestLen = tc;
+         if (t0 > maxDestLen)
+            maxDestLen = t0;
+
+         const auto compareIntervals = [](const auto& a, const auto& b) {
+            return a->Start() < b->Start();
+         };
+
+         const auto eps = 0.5 / track.GetRate();
+         auto sortedIntervals = std::vector(
+            track.Intervals().begin(),
+            track.Intervals().end()
+         );
+         auto sourceIntervals = std::vector(
+            firstTemp->Intervals().begin(),
+            firstTemp->Intervals().end()
+         );
+         std::sort(sortedIntervals.begin(), sortedIntervals.end(), compareIntervals);
+         std::sort(sourceIntervals.begin(), sourceIntervals.end(), compareIntervals);
+         for (auto it = sortedIntervals.begin(); it != sortedIntervals.end(); ++it)
+         {
+            const auto& interval = *it;
+            //Find first pasted interval
+            if (std::abs((*it)->GetPlayStartTime() - tc) > eps)
+               continue;
+
+            //Fix pasted clips names
+            for(int j = 0; j < repeatCount; ++j)
+            {
+               for (const auto& src : sourceIntervals)
+               {
+                  if(it == sortedIntervals.end())
+                     break;
+                  (*it++)->SetName(src->GetName());
+               }
+            }
+            break;
+         }
          nTrack++;
-      },
-      [&](Track *t)
+      }; },
+      [&](Track &t)
       {
-         if( t->IsSyncLockSelected() )
-            t->SyncLockAdjust(mT1, mT1 + (mT1 - mT0) * repeatCount);
+         if (SyncLock::IsSyncLockSelected(t))
+            t.SyncLockAdjust(mT1, mT1 + (mT1 - mT0) * repeatCount);
       }
    );
 
@@ -171,19 +184,22 @@ bool EffectRepeat::Process()
       mT1 = maxDestLen;
    }
 
-   ReplaceProcessedTracks(bGoodResult);
+   if (bGoodResult)
+      outputs.Commit();
    return bGoodResult;
 }
 
-void EffectRepeat::PopulateOrExchange(ShuttleGui & S)
+std::unique_ptr<EffectEditor> EffectRepeat::PopulateOrExchange(
+   ShuttleGui & S, EffectInstance &, EffectSettingsAccess &,
+   const EffectOutputs *)
 {
+   mUIParent = S.GetParent();
    S.StartHorizontalLay(wxCENTER, false);
    {
       mRepeatCount = S.Validator<IntegerValidator<int>>(
             &repeatCount, NumValidatorStyle::DEFAULT,
-            MIN_Count, 2147483647 / mProjectRate
-         )
-         .AddTextBox(XXO("&Number of repeats to add:"), wxT(""), 12);
+            Count.min, 2147483647 / mProjectRate )
+         .AddTextBox(XXO("&Number of repeats to add:"), L"", 12);
    }
    S.EndHorizontalLay();
 
@@ -194,9 +210,10 @@ void EffectRepeat::PopulateOrExchange(ShuttleGui & S)
       mTotalTime = S.AddVariableText(XO("New selection length: dd:hh:mm:ss"));
    }
    S.EndMultiColumn();
+   return nullptr;
 }
 
-bool EffectRepeat::TransferDataToWindow()
+bool EffectRepeat::TransferDataToWindow(const EffectSettings &)
 {
    mRepeatCount->ChangeValue(wxString::Format(wxT("%d"), repeatCount));
 
@@ -205,7 +222,7 @@ bool EffectRepeat::TransferDataToWindow()
    return true;
 }
 
-bool EffectRepeat::TransferDataFromWindow()
+bool EffectRepeat::TransferDataFromWindow(EffectSettings &)
 {
    if (!mUIParent->Validate())
    {
@@ -227,10 +244,10 @@ void EffectRepeat::DisplayNewTime()
    wxString str;
    mRepeatCount->GetValue().ToLong(&l);
 
-   NumericConverter nc(NumericConverter::TIME,
+   NumericConverter nc(FormatterContext::SampleRateContext(mProjectRate),
+                       NumericConverterType_TIME(),
                        GetSelectionFormat(),
-                       mT1 - mT0,
-                       mProjectRate);
+                       mT1 - mT0);
 
    str = wxString::Format( _("Current selection length: %s"), nc.GetString() );
 
@@ -238,7 +255,7 @@ void EffectRepeat::DisplayNewTime()
    mCurrentTime->SetName(str); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
 
    if (l > 0) {
-      EnableApply(true);
+      EffectEditor::EnableApply(mUIParent, true);
       repeatCount = l;
 
       nc.SetValue((mT1 - mT0) * (repeatCount + 1));
@@ -246,7 +263,7 @@ void EffectRepeat::DisplayNewTime()
    }
    else {
       str = _("Warning: No repeats.");
-      EnableApply(false);
+      EffectEditor::EnableApply(mUIParent, false);
    }
    mTotalTime->SetLabel(str);
    mTotalTime->SetName(str); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
@@ -255,4 +272,9 @@ void EffectRepeat::DisplayNewTime()
 void EffectRepeat::OnRepeatTextChange(wxCommandEvent & WXUNUSED(evt))
 {
    DisplayNewTime();
+}
+
+bool EffectRepeat::NeedsDither() const
+{
+   return false;
 }

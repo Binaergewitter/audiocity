@@ -10,13 +10,19 @@
 #ifndef __AUDACITY_EFFECT_PAULSTRETCH__
 #define __AUDACITY_EFFECT_PAULSTRETCH__
 
-#include "Effect.h"
+#include "StatefulEffect.h"
+#include "ShuttleAutomation.h"
+#include <float.h> // for FLT_MAX
+#include <wx/weakref.h>
 
 class ShuttleGui;
+class WaveChannel;
 
-class EffectPaulstretch final : public Effect
+class EffectPaulstretch final : public StatefulEffect
 {
 public:
+   static inline EffectPaulstretch *
+   FetchParameters(EffectPaulstretch &e, EffectSettings &) { return &e; }
    static const ComponentInterfaceSymbol Symbol;
 
    EffectPaulstretch();
@@ -24,42 +30,46 @@ public:
 
    // ComponentInterface implementation
 
-   ComponentInterfaceSymbol GetSymbol() override;
-   TranslatableString GetDescription() override;
-   wxString ManualPage() override;
+   ComponentInterfaceSymbol GetSymbol() const override;
+   TranslatableString GetDescription() const override;
+   ManualPageID ManualPage() const override;
 
    // EffectDefinitionInterface implementation
 
-   EffectType GetType() override;
-
-   // EffectClientInterface implementation
-
-   bool DefineParams( ShuttleParams & S ) override;
-   bool GetAutomationParameters(CommandParameters & parms) override;
-   bool SetAutomationParameters(CommandParameters & parms) override;
+   EffectType GetType() const override;
 
    // Effect implementation
 
-   double CalcPreviewInputLength(double previewLength) override;
-   bool Process() override;
-   void PopulateOrExchange(ShuttleGui & S) override;
-   bool TransferDataToWindow() override;
-   bool TransferDataFromWindow() override;
+   double CalcPreviewInputLength(
+      const EffectSettings &settings, double previewLength) const override;
+   bool Process(EffectInstance &instance, EffectSettings &settings) override;
+   std::unique_ptr<EffectEditor> PopulateOrExchange(
+      ShuttleGui & S, EffectInstance &instance,
+      EffectSettingsAccess &access, const EffectOutputs *pOutputs) override;
+   bool TransferDataToWindow(const EffectSettings &settings) override;
+   bool TransferDataFromWindow(EffectSettings &settings) override;
 
 private:
    // EffectPaulstretch implementation
    
    void OnText(wxCommandEvent & evt);
-   size_t GetBufferSize(double rate);
+   size_t GetBufferSize(double rate) const;
 
-   bool ProcessOne(WaveTrack *track, double t0, double t1, int count);
+   bool ProcessOne(const WaveChannel &track, WaveChannel &outputTrack,
+      double t0, double t1, int count);
 
-private:
+   wxWeakRef<wxWindow> mUIParent;
+
    float mAmount;
    float mTime_resolution;  //seconds
-   double m_t1;
 
+   const EffectParameterMethods& Parameters() const override;
    DECLARE_EVENT_TABLE()
+
+static constexpr EffectParameter Amount{ &EffectPaulstretch::mAmount,
+   L"Stretch Factor",   10.0f,    1.0,     FLT_MAX, 1   };
+static constexpr EffectParameter Time{ &EffectPaulstretch::mTime_resolution,
+   L"Time Resolution",  0.25f,   0.00099f,  FLT_MAX, 1   };
 };
 
 #endif

@@ -8,24 +8,23 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../../../Audacity.h" // for USE_* macros
+
 #ifdef USE_MIDI
 #include "NoteTrackVZoomHandle.h"
+#include "NoteTrackDisplayData.h"
 
-#include "../../../ui/TrackVRulerControls.h"
+#include "../../../ui/ChannelVRulerControls.h"
 
 #include "../../../../HitTestResult.h"
-#include "../../../../NoteTrack.h"
-#include "../../../../Project.h"
-#include "../../../../ProjectHistory.h"
+#include "NoteTrack.h"
+#include "Project.h"
+#include "ProjectHistory.h"
 #include "../../../../RefreshCode.h"
 #include "../../../../TrackArtist.h"
 #include "../../../../TrackPanelMouseEvent.h"
 #include "../../../../widgets/PopupMenuTable.h"
 #include "../../../../../images/Cursors.h"
-#include "../../../../Prefs.h"
-
-#include <wx/event.h>
+#include "Prefs.h"
 
 namespace
 {
@@ -43,9 +42,7 @@ namespace
    bool IsDragZooming(int zoomStart, int zoomEnd)
    {
       const int DragThreshold = 3;// Anything over 3 pixels is a drag, else a click.
-      bool bVZoom;
-      gPrefs->Read(wxT("/GUI/VerticalZooming"), &bVZoom, false);
-      return bVZoom && (abs(zoomEnd - zoomStart) > DragThreshold);
+      return abs(zoomEnd - zoomStart) > DragThreshold;
    }
 
 }
@@ -73,17 +70,12 @@ HitTestPreview NoteTrackVZoomHandle::HitPreview(const wxMouseState &state)
       ::MakeCursor(wxCURSOR_MAGNIFIER, ZoomOutCursorXpm, 19, 15);
    static  wxCursor arrowCursor{ wxCURSOR_ARROW };
 
-   bool bVZoom;
-   gPrefs->Read(wxT("/GUI/VerticalZooming"), &bVZoom, false);
-   bVZoom &= !state.RightIsDown();
-   const auto message = bVZoom ? 
-      XO("Click to vertically zoom in. Shift-click to zoom out. Drag to specify a zoom region.") :
-      XO("Right-click for menu.");
+   const auto message = 
+      XO("Click to vertically zoom in. Shift-click to zoom out. Drag to specify a zoom region.");
 
    return {
       message,
-      bVZoom ? (state.ShiftDown() ? &*zoomOutCursor : &*zoomInCursor) : &arrowCursor
-      // , message
+      state.ShiftDown() ? &*zoomOutCursor : &*zoomInCursor
    };
 }
 
@@ -103,6 +95,16 @@ UIHandlePtr NoteTrackVZoomHandle::HitTest
 
 NoteTrackVZoomHandle::~NoteTrackVZoomHandle()
 {
+}
+
+std::shared_ptr<const Track> NoteTrackVZoomHandle::FindTrack() const
+{
+   return mpTrack.lock();
+}
+
+bool NoteTrackVZoomHandle::HandlesRightClick()
+{
+   return true;
 }
 
 UIHandle::Result NoteTrackVZoomHandle::Click
@@ -173,8 +175,6 @@ protected:
 // Note that these can be with or without spectrum view which
 // adds a constant.
 //const int kZoom1to1 = 1;
-//const int kZoomTimes2 = 2;
-//const int kZoomDiv2 = 3;
 //const int kZoomHalfWave = 4;
 //const int kZoomInByDrag = 5;
       kZoomIn = 6,
@@ -189,8 +189,6 @@ protected:
    void OnZoom( int iZoomCode );
 // void OnZoomFitVertical(wxCommandEvent&){ OnZoom( kZoom1to1 );};
    void OnZoomReset(wxCommandEvent&){ OnZoom( kZoomReset );};
-// void OnZoomDiv2Vertical(wxCommandEvent&){ OnZoom( kZoomDiv2 );};
-// void OnZoomTimes2Vertical(wxCommandEvent&){ OnZoom( kZoomTimes2 );};
 // void OnZoomHalfWave(wxCommandEvent&){ OnZoom( kZoomHalfWave );};
    void OnZoomInVertical(wxCommandEvent&){ OnZoom( kZoomIn );};
    void OnZoomOutVertical(wxCommandEvent&){ OnZoom( kZoomOut );};
@@ -199,11 +197,6 @@ protected:
    void OnDownOctave(wxCommandEvent&){ OnZoom( kDownOctave );};
 
 private:
-   void DestroyMenu() override
-   {
-      mpData = nullptr;
-   }
-
    void InitUserData(void *pUserData) override;
 
    void UpdatePrefs() override
@@ -225,24 +218,25 @@ void NoteTrackVRulerMenuTable::InitUserData(void *pUserData)
 }
 
 void NoteTrackVRulerMenuTable::OnZoom( int iZoomCode ){
+   auto &data = NoteTrackRange::Get(*mpData->pTrack);
    switch( iZoomCode ){
    case kZoomReset:
-      mpData->pTrack->ZoomAllNotes();
+      data.ZoomAllNotes(&mpData->pTrack->GetSeq());
       break;
    case kZoomIn:
-      mpData->pTrack->ZoomIn(mpData->rect, mpData->yy);
+      NoteTrackDisplayData{ *mpData->pTrack, mpData->rect }.ZoomIn(mpData->yy);
       break;
    case kZoomOut:
-      mpData->pTrack->ZoomOut(mpData->rect, mpData->yy);
+      NoteTrackDisplayData{ *mpData->pTrack, mpData->rect }.ZoomOut(mpData->yy);
       break;
    case kZoomMax:
-      mpData->pTrack->ZoomMaxExtent();
+      data.ZoomMaxExtent();
       break;
    case kUpOctave:
-      mpData->pTrack->ShiftNoteRange(12);
+      data.ShiftNoteRange(12);
       break;
    case kDownOctave:
-      mpData->pTrack->ShiftNoteRange(-12);
+      data.ShiftNoteRange(-12);
       break;
    }
    AudacityProject *const project = &mpData->project;
@@ -255,8 +249,7 @@ void NoteTrackVRulerMenuTable::OnZoom( int iZoomCode ){
 BEGIN_POPUP_MENU(NoteTrackVRulerMenuTable)
 
    // Accelerators only if zooming enabled.
-   bool bVZoom;
-   gPrefs->Read(wxT("/GUI/VerticalZooming"), &bVZoom, false);
+   bool bVZoom = true;
 
    BeginSection( "Zoom" );
       BeginSection( "Basic" );
@@ -312,40 +305,39 @@ UIHandle::Result NoteTrackVZoomHandle::Release
 
       PopupMenuTable *const pTable =
           (PopupMenuTable *) &NoteTrackVRulerMenuTable::Instance();
-      auto pMenu = PopupMenuTable::BuildMenu(pParent, pTable, &data);
+      auto pMenu = PopupMenuTable::BuildMenu(pTable, &data);
 
-      pParent->PopupMenu(pMenu.get(), event.m_x, event.m_y);
+      pMenu->Popup( *pParent, { event.m_x, event.m_y } );
 
       return data.result;
    }
 
-   bool bVZoom;
-   gPrefs->Read(wxT("/GUI/VerticalZooming"), &bVZoom, false);
-   bVZoom &= event.GetId() != kCaptureLostEventId;
-   if( !bVZoom )
+   if( event.GetId() == kCaptureLostEventId )
       return RefreshAll;
 
+   NoteTrackDisplayData data{ *pTrack, evt.rect };
    if (IsDragZooming(mZoomStart, mZoomEnd)) {
-      pTrack->ZoomTo(evt.rect, mZoomStart, mZoomEnd);
+      data.ZoomTo(mZoomStart, mZoomEnd);
    }
    else if (event.ShiftDown() || event.RightUp()) {
       if (event.ShiftDown() && event.RightUp()) {
-         auto oldBotNote = pTrack->GetBottomNote();
-         auto oldTopNote = pTrack->GetTopNote();
+         auto &data = NoteTrackRange::Get(*pTrack);
+         auto oldBotNote = data.GetBottomNote();
+         auto oldTopNote = data.GetTopNote();
          // Zoom out to show all notes
-         pTrack->ZoomAllNotes();
-         if (pTrack->GetBottomNote() == oldBotNote &&
-               pTrack->GetTopNote() == oldTopNote) {
+         data.ZoomAllNotes(&pTrack->GetSeq());
+         if (data.GetBottomNote() == oldBotNote &&
+               data.GetTopNote() == oldTopNote) {
             // However if we are already showing all notes, zoom out further
-            pTrack->ZoomMaxExtent();
+            data.ZoomMaxExtent();
          }
       } else {
          // Zoom out
-         pTrack->ZoomOut(evt.rect, mZoomEnd);
+         data.ZoomOut(mZoomEnd);
       }
    }
    else {
-      pTrack->ZoomIn(evt.rect, mZoomEnd);
+      data.ZoomIn(mZoomEnd);
    }
 
    mZoomEnd = mZoomStart = 0;
@@ -370,8 +362,8 @@ void NoteTrackVZoomHandle::Draw(
          return;
       
       if ( IsDragZooming( mZoomStart, mZoomEnd ) )
-         TrackVRulerControls::DrawZooming
-            ( context, rect, mZoomStart, mZoomEnd );
+         ChannelVRulerControls::DrawZooming(
+            context, rect, mZoomStart, mZoomEnd);
    }
 }
 
@@ -380,7 +372,7 @@ wxRect NoteTrackVZoomHandle::DrawingArea(
    const wxRect &rect, const wxRect &panelRect, unsigned iPass )
 {
    if ( iPass == TrackArtist::PassZooming )
-      return TrackVRulerControls::ZoomingArea( rect, panelRect );
+      return ChannelVRulerControls::ZoomingArea(rect, panelRect);
    else
       return rect;
 }

@@ -14,9 +14,11 @@
 *//*******************************************************************/
 
 
-#include "../Audacity.h" // for USE_* macros
+
 #include "DeviceToolBar.h"
 #include "ToolManager.h"
+
+#include <thread>
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
@@ -24,9 +26,8 @@
 #include <wx/setup.h> // for wxUSE_* macros
 
 #ifndef WX_PRECOMP
+#include <wx/app.h>
 #include <wx/choice.h>
-#include <wx/event.h>
-#include <wx/intl.h>
 #include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/statbmp.h>
@@ -36,21 +37,20 @@
 
 #include "../TrackPanel.h"
 
-#include "../AColor.h"
-#include "../AllThemeResources.h"
-#include "../AudioIOBase.h"
-#include "../ImageManipulation.h"
+#include "AColor.h"
+#include "AllThemeResources.h"
+#include "AudioIOBase.h"
+#include "ImageManipulation.h"
 #include "../KeyboardCapture.h"
-#include "../Prefs.h"
-#include "../Project.h"
-#include "../ShuttleGui.h"
+#include "Prefs.h"
+#include "Project.h"
+#include "ShuttleGui.h"
 #include "../widgets/Grabber.h"
-#include "../DeviceManager.h"
-#include "../widgets/AudacityMessageBox.h"
-#include "../widgets/Grabber.h"
+#include "DeviceManager.h"
+#include "AudacityMessageBox.h"
 
 #if wxUSE_ACCESSIBILITY
-#include "../widgets/WindowAccessible.h"
+#include "WindowAccessible.h"
 #endif
 
 IMPLEMENT_CLASS(DeviceToolBar, ToolBar);
@@ -64,28 +64,38 @@ BEGIN_EVENT_TABLE(DeviceToolBar, ToolBar)
    EVT_COMMAND(wxID_ANY, EVT_CAPTURE_KEY, DeviceToolBar::OnCaptureKey)
 END_EVENT_TABLE()
 
-static int DeviceToolbarPrefsID()
+int DeviceToolbarPrefsID()
 {
    static int value = wxNewId();
    return value;
 }
 
+Identifier DeviceToolBar::ID()
+{
+   return wxT("Device");
+}
+
 //Standard constructor
 DeviceToolBar::DeviceToolBar( AudacityProject &project )
-: ToolBar( project, DeviceBarID, XO("Device"), wxT("Device"), true )
+: ToolBar( project, XO("Device"), ID(), true )
 {
-   wxTheApp->Bind( EVT_RESCANNED_DEVICES,
-      &DeviceToolBar::OnRescannedDevices, this );
+   mSubscription = DeviceManager::Instance()->Subscribe(
+      *this, &DeviceToolBar::OnRescannedDevices );
 }
 
 DeviceToolBar::~DeviceToolBar()
 {
 }
 
+bool DeviceToolBar::ShownByDefault() const
+{
+   return false;
+}
+
 DeviceToolBar &DeviceToolBar::Get( AudacityProject &project )
 {
    auto &toolManager = ToolManager::Get( project );
-   return *static_cast<DeviceToolBar*>( toolManager.GetToolBar(DeviceBarID) );
+   return *static_cast<DeviceToolBar*>(toolManager.GetToolBar(ID()));
 }
 
 const DeviceToolBar &DeviceToolBar::Get( const AudacityProject &project )
@@ -237,9 +247,6 @@ void DeviceToolBar::OnCaptureKey(wxCommandEvent &event)
 
 void DeviceToolBar::UpdatePrefs()
 {
-   wxString hostName;
-   wxString devName;
-   wxString sourceName;
    wxString desc;
    const std::vector<DeviceSourceMap> &inMaps  = DeviceManager::Instance()->GetInputDeviceMaps();
    const std::vector<DeviceSourceMap> &outMaps = DeviceManager::Instance()->GetOutputDeviceMaps();
@@ -247,16 +254,16 @@ void DeviceToolBar::UpdatePrefs()
 
    int hostSelectionIndex = mHost->GetSelection();
    wxString oldHost = hostSelectionIndex >= 0 ? mHost->GetString(hostSelectionIndex) :
-                                                wxT("");
-   hostName = gPrefs->Read(wxT("/AudioIO/Host"), wxT(""));
+                                                wxString{};
+   auto hostName = AudioIOHost.Read();
 
    // if the prefs host name doesn't match the one displayed, it changed
    // in another project's DeviceToolBar, so we need to repopulate everything.
    if (oldHost != hostName)
       FillHostDevices();
 
-   devName = gPrefs->Read(wxT("/AudioIO/RecordingDevice"), wxT(""));
-   sourceName = gPrefs->Read(wxT("/AudioIO/RecordingSource"), wxT(""));
+   auto devName = AudioIORecordingDevice.Read();
+   auto sourceName = AudioIORecordingSource.Read();
    if (sourceName.empty())
       desc = devName;
    else
@@ -285,8 +292,8 @@ void DeviceToolBar::UpdatePrefs()
       }
    }
 
-   devName = gPrefs->Read(wxT("/AudioIO/PlaybackDevice"), wxT(""));
-   sourceName = gPrefs->Read(wxT("/AudioIO/PlaybackSource"), wxT(""));
+   devName = AudioIOPlaybackDevice.Read();
+   sourceName = AudioIOPlaybackSource.Read();
    if (sourceName.empty())
       desc = devName;
    else
@@ -315,9 +322,9 @@ void DeviceToolBar::UpdatePrefs()
       }
    }
 
-   long oldChannels, newChannels;
+   long oldChannels;
    oldChannels = mInputChannels->GetSelection() + 1;
-   gPrefs->Read(wxT("/AudioIO/RecordChannels"), &newChannels, 0);
+   auto newChannels = AudioIORecordChannels.ReadWithDefault(0);
    if (newChannels > 0 && oldChannels != newChannels)
       mInputChannels->SetSelection(newChannels - 1);
 
@@ -432,7 +439,7 @@ void DeviceToolBar::FillHostDevices()
    const std::vector<DeviceSourceMap> &outMaps = DeviceManager::Instance()->GetOutputDeviceMaps();
 
    //read what is in the prefs
-   wxString host = gPrefs->Read(wxT("/AudioIO/Host"), wxT(""));
+   auto host = AudioIOHost.Read();
    int foundHostIndex = -1;
 
    // if the host is not in the hosts combo then we rescanned.
@@ -482,7 +489,7 @@ void DeviceToolBar::FillHostDevices()
          mInput->Append(MakeDeviceSourceString(&device));
          if (host.empty()) {
             host = device.hostString;
-            gPrefs->Write(wxT("/AudioIO/Host"), host);
+            AudioIOHost.Write(host);
             mHost->SetStringSelection(host);
          }
       }
@@ -496,7 +503,7 @@ void DeviceToolBar::FillHostDevices()
          mOutput->Append(MakeDeviceSourceString(&device));
          if (host.empty()) {
             host = device.hostString;
-            gPrefs->Write(wxT("/AudioIO/Host"), host);
+            AudioIOHost.Write(host);
             gPrefs->Flush();
             mHost->SetStringSelection(host);
          }
@@ -512,12 +519,12 @@ void DeviceToolBar::FillHostDevices()
 void DeviceToolBar::FillInputChannels()
 {
    const std::vector<DeviceSourceMap> &inMaps = DeviceManager::Instance()->GetInputDeviceMaps();
-   wxString host     = gPrefs->Read(wxT("/AudioIO/Host"), wxT(""));
-   wxString device   = gPrefs->Read(wxT("/AudioIO/RecordingDevice"), wxT(""));
-   wxString source   = gPrefs->Read(wxT("/AudioIO/RecordingSource"), wxT(""));
-   long oldChannels = 2, newChannels;
+   auto host = AudioIOHost.Read();
+   auto device = AudioIORecordingDevice.Read();
+   auto source = AudioIORecordingSource.Read();
+   long newChannels;
 
-   gPrefs->Read(wxT("/AudioIO/RecordChannels"), &oldChannels);
+   auto oldChannels = AudioIORecordChannels.Read();
    mInputChannels->Clear();
    for (auto & dev: inMaps) {
       if (source == dev.sourceString &&
@@ -546,7 +553,7 @@ void DeviceToolBar::FillInputChannels()
          if (newChannels >= 1) {
             mInputChannels->SetSelection(newChannels - 1);
          }
-         gPrefs->Write(wxT("/AudioIO/RecordChannels"), newChannels);
+         AudioIORecordChannels.Write(newChannels);
          break;
       }
    }
@@ -555,11 +562,11 @@ void DeviceToolBar::FillInputChannels()
    mInputChannels->SetMinSize(wxSize(50, wxDefaultCoord));
 }
 
-void DeviceToolBar::OnRescannedDevices( wxCommandEvent &event )
+void DeviceToolBar::OnRescannedDevices(DeviceChangeMessage m)
 {
-   event.Skip();
    // Hosts may have disappeared or appeared so a complete repopulate is needed.
-   RefillCombos();
+   if (m == DeviceChangeMessage::Rescan)
+      RefillCombos();
 }
 
 //return 1 if host changed, 0 otherwise.
@@ -568,7 +575,7 @@ int DeviceToolBar::ChangeHost()
    int hostSelectionIndex;
    hostSelectionIndex = mHost->GetSelection();
 
-   wxString oldHost = gPrefs->Read(wxT("/AudioIO/Host"), wxT(""));
+   auto oldHost = AudioIOHost.Read();
    wxString newHost = hostSelectionIndex >= 0 ? mHost->GetString(hostSelectionIndex) :
                                                 oldHost;
 
@@ -576,7 +583,7 @@ int DeviceToolBar::ChangeHost()
       return 0;
 
    //change the host and switch to correct devices.
-   gPrefs->Write(wxT("/AudioIO/Host"), newHost);
+   AudioIOHost.Write(newHost);
    gPrefs->Flush();
 
    // populate the devices
@@ -588,24 +595,23 @@ int DeviceToolBar::ChangeHost()
 void DeviceToolBar::SetDevices(const DeviceSourceMap *in, const DeviceSourceMap *out)
 {
    if (in) {
-      gPrefs->Write(wxT("/AudioIO/RecordingDevice"), in->deviceString);
-      gPrefs->Write(wxT("/AudioIO/RecordingSourceIndex"), in->sourceIndex);
-      if (in->totalSources >= 1) {
-         gPrefs->Write(wxT("/AudioIO/RecordingSource"), in->sourceString);
-      } else {
-         gPrefs->Write(wxT("/AudioIO/RecordingSource"), wxT(""));
-      }
+      AudioIORecordingDevice.Write(in->deviceString);
+      AudioIORecordingSourceIndex.Write(in->sourceIndex);
+      if (in->totalSources >= 1)
+         AudioIORecordingSource.Write(in->sourceString);
+      else
+         AudioIORecordingSource.Reset();
       gPrefs->Flush();
 
       FillInputChannels();
    }
 
    if (out) {
-      gPrefs->Write(wxT("/AudioIO/PlaybackDevice"), out->deviceString);
+      AudioIOPlaybackDevice.Write(out->deviceString);
       if (out->totalSources >= 1) {
-         gPrefs->Write(wxT("/AudioIO/PlaybackSource"), out->sourceString);
+         AudioIOPlaybackSource.Write(out->sourceString);
       } else {
-         gPrefs->Write(wxT("/AudioIO/PlaybackSource"), wxT(""));
+         AudioIOPlaybackSource.Reset();
       }
       gPrefs->Flush();
    }
@@ -618,7 +624,7 @@ void DeviceToolBar::ChangeDevice(bool isInput)
    size_t i;
 
    int selectionIndex  = combo->GetSelection();
-   wxString host       = gPrefs->Read(wxT("/AudioIO/Host"), wxT(""));
+   auto host = AudioIOHost.Read();
    const std::vector<DeviceSourceMap> &maps = isInput ? DeviceManager::Instance()->GetInputDeviceMaps()
                                                       : DeviceManager::Instance()->GetOutputDeviceMaps();
 
@@ -652,7 +658,7 @@ void DeviceToolBar::OnChoice(wxCommandEvent &event)
    } else if (eventObject == mInputChannels) {
       int channelsSelectionIndex = mInputChannels->GetSelection();
       if (channelsSelectionIndex >= 0)
-         gPrefs->Write(wxT("/AudioIO/RecordChannels"),channelsSelectionIndex + 1);
+         AudioIORecordChannels.Write(channelsSelectionIndex + 1);
    } else if (eventObject == mInput) {
       ChangeDevice(true);
    }
@@ -678,14 +684,15 @@ void DeviceToolBar::OnChoice(wxCommandEvent &event)
       if (gAudioIO->IsMonitoring())
       {
          gAudioIO->StopStream();
-         while (gAudioIO->IsBusy())
-            wxMilliSleep(100);
+         while (gAudioIO->IsBusy()) {
+            using namespace std::chrono;
+            std::this_thread::sleep_for(100ms);
+         }
       }
       gAudioIO->HandleDeviceChange();
    }
 
-   wxTheApp->AddPendingEvent(wxCommandEvent{
-      EVT_PREFS_UPDATE, DeviceToolbarPrefsID() });
+   PrefsListener::Broadcast(DeviceToolbarPrefsID());
 }
 
 void DeviceToolBar::ShowInputDialog()
@@ -748,7 +755,7 @@ void DeviceToolBar::ShowComboDialog(wxChoice *combo, const TranslatableString &t
 #endif
 }
 
-static RegisteredToolbarFactory factory{ DeviceBarID,
+static RegisteredToolbarFactory factory{
    []( AudacityProject &project ){
       return ToolBar::Holder{ safenew DeviceToolBar{ project } }; }
 };
@@ -757,7 +764,69 @@ namespace {
 AttachedToolBarMenuItem sAttachment{
    /* i18n-hint: Clicking this menu item shows the toolbar
       that manages devices */
-   DeviceBarID, wxT("ShowDeviceTB"), XXO("&Device Toolbar")
+   DeviceToolBar::ID(), wxT("ShowDeviceTB"), XXO("&Device Toolbar")
 };
 }
 
+
+// Define some related menu items
+#include "CommandContext.h"
+#include "../CommonCommandFlags.h"
+
+namespace {
+void OnInputDevice(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &tb = DeviceToolBar::Get( project );
+   tb.ShowInputDialog();
+}
+
+void OnOutputDevice(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &tb = DeviceToolBar::Get( project );
+   tb.ShowOutputDialog();
+}
+
+void OnInputChannels(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &tb = DeviceToolBar::Get( project );
+   tb.ShowChannelsDialog();
+}
+
+void OnAudioHost(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &tb = DeviceToolBar::Get( project );
+   tb.ShowHostDialog();
+}
+
+// Menu definitions
+
+using namespace MenuRegistry;
+// Under /MenuBar/Optional/Extra/Part1
+auto ExtraDeviceMenu()
+{
+   static auto menu = std::shared_ptr{
+   Menu( wxT("Device"), XXO("De&vice"),
+      Command( wxT("InputDevice"), XXO("Change &Recording Device..."),
+         OnInputDevice,
+         AudioIONotBusyFlag(), wxT("Shift+I") ),
+      Command( wxT("OutputDevice"), XXO("Change &Playback Device..."),
+         OnOutputDevice,
+         AudioIONotBusyFlag(), wxT("Shift+O") ),
+      Command( wxT("AudioHost"), XXO("Change Audio &Host..."), OnAudioHost,
+         AudioIONotBusyFlag(), wxT("Shift+H") ),
+      Command( wxT("InputChannels"), XXO("Change Recording Cha&nnels..."),
+         OnInputChannels,
+         AudioIONotBusyFlag(), wxT("Shift+N") )
+   ) };
+   return menu;
+}
+
+AttachedItem sAttachment2{ Indirect(ExtraDeviceMenu()),
+   Placement{ wxT("Optional/Extra/Part1"), { OrderingHint::End } }
+};
+
+}

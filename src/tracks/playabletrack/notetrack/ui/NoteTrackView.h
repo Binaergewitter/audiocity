@@ -11,21 +11,22 @@ Paul Licameli split from class NoteTrack
 #ifndef __AUDACITY_NOTE_TRACK_VIEW__
 #define __AUDACITY_NOTE_TRACK_VIEW__
 
-#include "../../../ui/CommonTrackView.h"
+#include "../../../ui/CommonChannelView.h"
 
-class NoteTrackView final : public CommonTrackView
+class NoteTrackView final : public CommonChannelView
 {
    NoteTrackView( const NoteTrackView& ) = delete;
    NoteTrackView &operator=( const NoteTrackView& ) = delete;
 
 public:
    explicit
-   NoteTrackView( const std::shared_ptr<Track> &pTrack );
+   NoteTrackView(const std::shared_ptr<Channel> &pChannel);
    ~NoteTrackView() override;
 
-   std::shared_ptr<TrackVRulerControls> DoGetVRulerControls() override;
-
 private:
+   std::shared_ptr<ChannelVRulerControls> DoGetVRulerControls() override;
+   std::shared_ptr<CommonTrackCell> GetAffordanceControls() override;
+
    std::vector<UIHandlePtr> DetailedHitTest
       (const TrackPanelMouseState &state,
        const AudacityProject *pProject, int currentTool, bool bMultiTool)
@@ -35,5 +36,11 @@ private:
    void Draw(
       TrackPanelDrawingContext &context,
       const wxRect &rect, unsigned iPass ) override;
+
+   std::shared_ptr<CommonTrackCell> mpAffordanceCellControl;
+
+#ifdef EXPERIMENTAL_MIDI_STRETCHING
+   std::weak_ptr<class StretchHandle> mStretchHandle;
+#endif
 };
 #endif

@@ -17,8 +17,6 @@
 
 #include <wx/brush.h> // member variable
 
-#include "audacity/Types.h"
-
 class wxChoice;
 class wxCommandEvent;
 class wxImage;
@@ -28,6 +26,7 @@ class AButton;
 class ASlider;
 class AudacityProject;
 class BoundedEnvelope;
+class sampleCount;
 class WaveTrack;
 
 #ifdef EXPERIMENTAL_VOICE_DETECTION
@@ -63,8 +62,14 @@ class TranscriptionToolBar final : public ToolBar {
 
  public:
 
+   static Identifier ID();
+
    TranscriptionToolBar( AudacityProject &project );
    virtual ~TranscriptionToolBar();
+
+   bool ShownByDefault() const override;
+
+   DockID DefaultDockID() const override;
 
    static TranscriptionToolBar &Get( AudacityProject &project );
    static const TranscriptionToolBar &Get( const AudacityProject &project );
@@ -115,7 +120,7 @@ class TranscriptionToolBar final : public ToolBar {
    void SetEnabled(bool enabled);
    void SetPlaying(bool down, bool looped, bool cutPreview);
 
-   double GetPlaySpeed() const { return mPlaySpeed / 100.0; }
+   double GetPlaySpeed() const { return mPlaySpeed / 1000.0; }
 
  private:
 

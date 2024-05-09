@@ -17,7 +17,7 @@
 #include "Prefs.h"
 #include "SampleFormat.h"
 #include "SpectrumAnalyst.h"
-#include "widgets/wxPanelWrapper.h" // to inherit
+#include "wxPanelWrapper.h" // to inherit
 
 class wxMemoryDC;
 class wxScrollBar;
@@ -67,7 +67,7 @@ public:
 private:
    void Populate();
 
-   void GetAudio();
+   bool GetAudio();
 
    void PlotMouseEvent(wxMouseEvent & event);
    void PlotPaint(wxPaintEvent & event);

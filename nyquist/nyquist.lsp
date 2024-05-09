@@ -1429,7 +1429,7 @@ loop
 ;;
 ;; Time transformation: the envelope is not warped; the start time and
 ;; stop times are warped to global time.  Then the value of *SUSTAIN* at
-;; the beginning of the envelope is used to determing absolute duration.
+;; the beginning of the envelope is used to determining absolute duration.
 ;; Since PWL is ultimately called to create the envelope, we must use
 ;; ABS-ENV to prevent any further transforms inside PWL.  We use
 ;; (AT global-start ...) inside ABS-ENV so that the final result has 
@@ -1501,10 +1501,10 @@ loop
          (format t "WARNING: ~A ~A function; setting falltime to 0.01.\n"
                  "falltime must be greater than zero in" source)
          (setf falltime 0.01)))
-  (cond ((< floor 0.001)
-         (format t "WARNING: ~A ~A function; setting floor to 0.001.\n"
+  (cond ((< floor 0.00001)
+         (format t "WARNING: ~A ~A function; setting floor to 0.00001.\n"
                  "floor must be greater than zero in" source)
-         (setf floor 0.001)))
+         (setf floor 0.00001)))
   (let (s) ;; s becomes sound after collapsing to one channel
     (cond ((arrayp sound)           ;; use s-max over all channels so that
            (setf s (aref sound 0))  ;; ANY channel opens the gate
@@ -1525,7 +1525,7 @@ loop
            ;; they are computed, so no samples will accumulate. But wait! The
            ;; 2nd SEQ expression with S-REST can reference s and sound because
            ;; (due to macro magic) a closure is constructed to hold them until
-           ;; the 2nd SEQ expression is evaluted. It's almost as though s and
+           ;; the 2nd SEQ expression is evaluated. It's almost as though s and
            ;; sound are back to being global variables. Since the closure does
            ;; not actually use either s or sound, we can clear them (we are
            ;; still in the same environment as the closures packed inside SEQ,

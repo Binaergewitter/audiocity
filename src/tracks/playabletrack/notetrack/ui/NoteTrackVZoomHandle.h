@@ -34,9 +34,11 @@ public:
 
    virtual ~NoteTrackVZoomHandle();
 
-   std::shared_ptr<NoteTrack> GetTrack() const { return mpTrack.lock(); }
+   std::shared_ptr<const Track> FindTrack() const override;
 
    void Enter(bool forward, AudacityProject *) override;
+
+   bool HandlesRightClick() override;
 
    Result Click
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;

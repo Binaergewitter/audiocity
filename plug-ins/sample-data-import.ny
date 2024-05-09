@@ -2,23 +2,22 @@ $nyquist plug-in
 $version 4
 $type tool generate
 $name (_ "Sample Data Import")
-$manpage "Sample_Data_Import"
-$action (_ "Reading and rendering samples...")
+$debugbutton false
 $author (_ "Steve Daulton")
-$release 2.3.0
-$copyright (_ "Released under terms of the GNU General Public License version 2")
+$release 3.0.4-1
+$copyright (_ "GNU General Public License v2.0 or later")
 
-$control filename (_ "Select file") file "" "*default*/sample-data.txt" (((_ "Text file") (txt TXT))
-                        ((_ "All files") (""))) "open,exists"
-$control bad-data (_ "Invalid data handling") choice (("ThrowError" (_ "Throw Error"))
-                                                      ("ReadAsZero" (_ "Read as Zero"))) 0
-
-
-;; Released under terms of the GNU General Public License version 2:
+;; License: GPL v2+
 ;; http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 ;;
 ;; For information about writing and modifying Nyquist plug-ins:
 ;; https://wiki.audacityteam.org/wiki/Nyquist_Plug-ins_Reference
+
+
+$control FILENAME (_ "Select file") file "" "*default*/sample-data.txt" (((_ "Text file") (txt TXT))
+                        ((_ "All files") (""))) "open,exists"
+$control BAD-DATA (_ "Invalid data handling") choice (("ThrowError" (_ "Throw Error"))
+                                                      ("ReadAsZero" (_ "Read as Zero"))) 0
 
 
 ;; Check file can be opened
@@ -40,11 +39,11 @@ $control bad-data (_ "Invalid data handling") choice (("ThrowError" (_ "Throw Er
         t)))
 
 ;; ':new' creates a new class 'streamreader'
-;; 'filestream' and 'chanel' are its instance variables.
+;; 'filestream' and 'channel' are its instance variables.
 ;; (every object of class 'streamreader' has its own
 ;; copy of these variables)
 (setq streamreader
-  (send class :new '(filestream chanel)))
+  (send class :new '(filestream channel)))
 
 ;; Initialize class 'streamreader'
 (send streamreader :answer :isnew '(stream ch) '(
@@ -73,7 +72,7 @@ $control bad-data (_ "Invalid data handling") choice (("ThrowError" (_ "Throw Er
     (cond
       ((not val) nil) ;end of file
       ((numberp val)  (float val)) ;valid.
-      ((= bad-data 0) ;invalid. Throw error and quit
+      ((= BAD-DATA 0) ;invalid. Throw error and quit
           (throw 'err (format nil (_ "Error~%~
               Data must be numbers in plain ASCII text.~%~
               '~a' is not a numeric value.") val)))
@@ -83,19 +82,19 @@ $control bad-data (_ "Invalid data handling") choice (("ThrowError" (_ "Throw Er
 (defun make-sound-object (stream chan)
   (send streamreader :new stream chan))
 
-(defun sound-from-file (filename)
+(defun sound-from-file ()
   ;; Set path. fileopenp should return 'true'
-  (if (not (fileopensp filename))
+  (if (not (fileopensp FILENAME))
       (throw 'err (format nil (_ "Error.~%Unable to open file"))))
   ; Note: we can't use (arrayp *track*) because
   ; *track* is nil in generate type plug-ins.
   (cond 
     ((= (get '*track*  'channels) 2)
-        (let ((left-snd (get-sound filename 1))
-              (right-snd (get-sound filename 2)))
+        (let ((left-snd (get-sound FILENAME 1))
+              (right-snd (get-sound FILENAME 2)))
           (vector left-snd right-snd)))
     (t  ;; Mono track
-        (get-sound filename 0))))
+        (get-sound FILENAME 0))))
 
 (defun get-sound (fname chan)
   (let* ((stream (open fname :direction :input))
@@ -105,4 +104,4 @@ $control bad-data (_ "Invalid data handling") choice (("ThrowError" (_ "Throw Er
     (close stream)
     audio-out))
 
-(catch 'err (sound-from-file filename))
+(catch 'err (sound-from-file))

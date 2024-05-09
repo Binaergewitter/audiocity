@@ -8,18 +8,17 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../../Audacity.h"
+
 #include "LabelTrackControls.h"
 
 #include "LabelTrackView.h"
 #include "../../../HitTestResult.h"
 #include "../../../LabelTrack.h"
 #include "../../../widgets/PopupMenuTable.h"
-#include "../../../Prefs.h"
+#include "Prefs.h"
 #include "../../../RefreshCode.h"
-#include "../../../ShuttleGui.h"
-#include "../../../widgets/wxPanelWrapper.h"
-#include <wx/dialog.h>
+#include "ShuttleGui.h"
+#include "wxPanelWrapper.h"
 #include <wx/fontenum.h>
 #include <wx/listbox.h>
 #include <wx/spinctrl.h>
@@ -48,11 +47,6 @@ public:
    void InitUserData(void *pUserData) override
    {
       mpData = static_cast<CommonTrackControls::InitMenuData*>(pUserData);
-   }
-
-   void DestroyMenu() override
-   {
-      mpData = nullptr;
    }
 
    CommonTrackControls::InitMenuData *mpData{};
@@ -110,7 +104,7 @@ void LabelTrackMenuTable::OnSetFont(wxCommandEvent &)
    facename = LabelTrackView::GetFont(facename).GetFaceName();
 
    long fontsize = gPrefs->Read(wxT("/GUI/LabelFontSize"),
-                                LabelTrackView::DefaultFontSize);
+                                static_cast<int>(LabelTrackView::DefaultFontSize));
 
    /* i18n-hint: (noun) This is the font for the label track.*/
    wxDialogWrapper dlg(mpData->pParent, wxID_ANY, XO("Label Track Font"));
@@ -179,16 +173,14 @@ PopupMenuTable *LabelTrackControls::GetMenuExtension(Track *)
 }
 
 using DoGetLabelTrackControls = DoGetControls::Override< LabelTrack >;
-template<> template<> auto DoGetLabelTrackControls::Implementation() -> Function {
+DEFINE_ATTACHED_VIRTUAL_OVERRIDE(DoGetLabelTrackControls) {
    return [](LabelTrack &track) {
       return std::make_shared<LabelTrackControls>( track.SharedPointer() );
    };
 }
-static DoGetLabelTrackControls registerDoGetLabelTrackControls;
 
 using GetDefaultLabelTrackHeight = GetDefaultTrackHeight::Override< LabelTrack >;
-template<> template<>
-auto GetDefaultLabelTrackHeight::Implementation() -> Function {
+DEFINE_ATTACHED_VIRTUAL_OVERRIDE(GetDefaultLabelTrackHeight) {
    return [](LabelTrack &) {
       // Label tracks are narrow
       // Default is to allow two rows so that NEW users get the
@@ -196,4 +188,3 @@ auto GetDefaultLabelTrackHeight::Implementation() -> Function {
       return 73;
    };
 }
-static GetDefaultLabelTrackHeight registerGetDefaultLabelTrackHeight;

@@ -8,7 +8,7 @@
 
 **********************************************************************/
 
-#include "Audacity.h" // for USE_* macros
+
 
 
 #ifndef __AUDACITY_MIXER_BOARD__
@@ -20,6 +20,7 @@
 #include "widgets/ASlider.h" // to inherit
 #include "commands/CommandManagerWindowClasses.h"
 
+#include "Observer.h"
 #include "Prefs.h"
 
 class wxArrayString;
@@ -27,7 +28,11 @@ class wxBitmapButton;
 class wxImage;
 class wxMemoryDC;
 class AButton;
+struct AudioIOEvent;
 struct TrackListEvent;
+class AudioSegmentSampleView;
+
+using ChannelGroupSampleView = std::vector<std::vector<AudioSegmentSampleView>>;
 
 // containment hierarchy:
 //    MixerBoardFrame -> MixerBoard -> MixerBoardScrolledWindow -> MixerTrackCluster(s)
@@ -69,6 +74,7 @@ class NoteTrack;
 #endif
 class PlayableTrack;
 
+class WaveChannel;
 class WaveTrack;
 class auStaticText;
 
@@ -76,26 +82,22 @@ class MixerTrackCluster final : public wxPanelWrapper
 {
 public:
    MixerTrackCluster(wxWindow* parent,
-                     MixerBoard* grandParent, AudacityProject* project,
-                     const std::shared_ptr<PlayableTrack> &pTrack,
-                     const wxPoint& pos = wxDefaultPosition,
-                     const wxSize& size = wxDefaultSize);
+      MixerBoard* grandParent, AudacityProject* project,
+      PlayableTrack &track,
+      const wxPoint& pos = wxDefaultPosition,
+      const wxSize& size = wxDefaultSize);
    virtual ~MixerTrackCluster() {}
 
    WaveTrack *GetWave() const;
-   WaveTrack *GetRight() const;
-#ifdef EXPERIMENTAL_MIDI_OUT
+   WaveChannel *GetRight() const;
    NoteTrack *GetNote() const;
-#endif
 
    //void UpdatePrefs();
 
    void HandleResize(); // For wxSizeEvents, update gain slider and meter.
 
    void HandleSliderGain(const bool bWantPushState = false);
-#ifdef EXPERIMENTAL_MIDI_OUT
    void HandleSliderVelocity(const bool bWantPushState = false);
-#endif
    void HandleSliderPan(const bool bWantPushState = false);
 
    void ResetMeter(const bool bResetClipping);
@@ -115,9 +117,7 @@ private:
 
    void OnButton_MusicalInstrument(wxCommandEvent& event);
    void OnSlider_Gain(wxCommandEvent& event);
-#ifdef EXPERIMENTAL_MIDI_OUT
    void OnSlider_Velocity(wxCommandEvent& event);
-#endif
    void OnSlider_Pan(wxCommandEvent& event);
    void OnButton_Mute(wxCommandEvent& event);
    void OnButton_Solo(wxCommandEvent& event);
@@ -125,7 +125,8 @@ private:
 
 
 public:
-   std::shared_ptr<PlayableTrack>   mTrack;
+   //! Invariant not null
+   std::shared_ptr<PlayableTrack> mTrack;
 
 private:
    MixerBoard* mMixerBoard;
@@ -138,10 +139,9 @@ private:
    AButton* mToggleButton_Solo;
    MixerTrackSlider* mSlider_Pan;
    MixerTrackSlider* mSlider_Gain;
-#ifdef EXPERIMENTAL_MIDI_OUT
    MixerTrackSlider* mSlider_Velocity;
-#endif
    wxWeakRef<MeterPanel> mMeter;
+   ChannelGroupSampleView mSampleView;
 
 public:
    DECLARE_EVENT_TABLE()
@@ -221,7 +221,7 @@ public:
    void UpdateWidth();
 
 private:
-   void ResetMeters(const bool bResetClipping);   
+   void ResetMeters(const bool bResetClipping);
    void RemoveTrackCluster(size_t nIndex);
    void MakeButtonBitmap( wxMemoryDC & dc, wxBitmap & bitmap,
       wxRect & bev, const TranslatableString & str, bool up );
@@ -233,10 +233,10 @@ private:
    // event handlers
    void OnPaint(wxPaintEvent& evt);
    void OnSize(wxSizeEvent &evt);
-   void OnTimer(wxCommandEvent &event);
-   void OnTrackSetChanged(wxEvent &event);
-   void OnTrackChanged(TrackListEvent &event);
-   void OnStartStop(wxCommandEvent &event);
+   void OnTimer(Observer::Message);
+   void OnTrackSetChanged();
+   void OnTrackChanged(const TrackListEvent &event);
+   void OnStartStop(AudioIOEvent);
 
 public:
    // mute & solo button images: Create once and store on MixerBoard for use in all MixerTrackClusters.
@@ -247,6 +247,10 @@ public:
    int mMuteSoloWidth;
 
 private:
+   Observer::Subscription mPlaybackScrollerSubscription,
+      mTrackPanelSubscription,
+      mAudioIOSubscription;
+
    // Track clusters are maintained in the same order as the WaveTracks.
    std::vector<MixerTrackCluster*> mMixerTrackClusters;
 
@@ -281,6 +285,7 @@ private:
 
    void SetWindowTitle();
 
+   Observer::Subscription mTitleChangeSubscription;
    AudacityProject *mProject;
 public:
    MixerBoard* mMixerBoard;

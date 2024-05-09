@@ -30,7 +30,7 @@
 *//*******************************************************************/
 
 
-#include "../Audacity.h"
+
 #include "EditToolBar.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
@@ -39,45 +39,103 @@
 #include <wx/setup.h> // for wxUSE_* macros
 
 #ifndef WX_PRECOMP
-#include <wx/event.h>
-#include <wx/image.h>
-#include <wx/intl.h>
+#include <wx/app.h>
 #include <wx/sizer.h>
 #include <wx/tooltip.h>
 #endif
 
-#include "../AllThemeResources.h"
-#include "../BatchCommands.h"
-#include "../ImageManipulation.h"
-#include "../Menus.h"
-#include "../Prefs.h"
-#include "../Project.h"
-#include "../UndoManager.h"
+#include "AllThemeResources.h"
+#include "ImageManipulation.h"
+#include "Prefs.h"
+#include "Project.h"
+#include "UndoManager.h"
 #include "../widgets/AButton.h"
 
-#include "../commands/CommandContext.h"
-#include "../commands/CommandManager.h"
+#include "CommandContext.h"
+#include "CommandManager.h"
+#include "../commands/CommandDispatch.h"
+
+enum {
+   ETBZoomInID,
+   ETBZoomOutID,
+   ETBZoomToggleID,
+
+   ETBZoomSelID,
+   ETBZoomFitID,
+
+   ETBTrimID,
+   ETBSilenceID,
+
+   // no sync-lock on/off button.
+   // #define OPTION_SYNC_LOCK_BUTTON
+
+#ifdef OPTION_SYNC_LOCK_BUTTON
+   ETBSyncLockID,
+#endif
+
+   ETBUndoID,
+   ETBRedoID,
+
+   ETBNumButtons
+};
+
+#ifdef OPTION_SYNC_LOCK_BUTTON
+#include "SyncLock.h"
+#endif
+
+constexpr int first_ETB_ID = 11300;
+
+static const ToolBarButtons::ButtonList EditToolbarButtonList = {
+   { ETBZoomInID,   wxT("ZoomIn"),      XO("Zoom In")  },
+   { ETBZoomOutID,  wxT("ZoomOut"),     XO("Zoom Out")  },
+   { ETBZoomToggleID,   wxT("ZoomToggle"),      XO("Zoom Toggle")  },
+   { ETBZoomSelID,  wxT("ZoomSel"),     XO("Fit selection to width")  },
+   { ETBZoomFitID,  wxT("FitInWindow"), XO("Fit project to width")  },
+
+   { ETBTrimID,     wxT("Trim"),        XO("Trim audio outside selection")  },
+   { ETBSilenceID,  wxT("Silence"),     XO("Silence audio selection")  },
+#ifdef OPTION_SYNC_LOCK_BUTTON
+   { ETBSyncLockID, wxT("SyncLock"),    XO("Sync-Lock Tracks")  },
+#endif
+   { ETBUndoID,     wxT("Undo"),        XO("Undo")  },
+   { ETBRedoID,     wxT("Redo"),        XO("Redo")  },
+};
 
 IMPLEMENT_CLASS(EditToolBar, ToolBar);
-
-const int BUTTON_WIDTH = 27;
-const int SEPARATOR_WIDTH = 14;
 
 ////////////////////////////////////////////////////////////
 /// Methods for EditToolBar
 ////////////////////////////////////////////////////////////
 
 BEGIN_EVENT_TABLE( EditToolBar, ToolBar )
-   EVT_COMMAND_RANGE( ETBCutID+first_ETB_ID,
-                      ETBCutID+first_ETB_ID + ETBNumButtons - 1,
+   EVT_COMMAND_RANGE(ETBZoomInID+first_ETB_ID,
+                      ETBZoomInID+first_ETB_ID + ETBNumButtons - 1,
                       wxEVT_COMMAND_BUTTON_CLICKED,
                       EditToolBar::OnButton )
 END_EVENT_TABLE()
 
+Identifier EditToolBar::ID()
+{
+   return wxT("Edit");
+}
+
 //Standard constructor
 EditToolBar::EditToolBar( AudacityProject &project )
-: ToolBar(project, EditBarID, XO("Edit"), wxT("Edit"))
+: ToolBar(project, XO("Edit"), ID())
+, mButtons{ this, project, EditToolbarButtonList, ETBNumButtons, first_ETB_ID }
 {
+#ifdef OPTION_SYNC_LOCK_BUTTON
+   auto action = [this]() {
+      bool bSyncLockTracks = SyncLockTracks.Read();
+
+      if (bSyncLockTracks)
+         mButtons.PushDown(ETBSyncLockID);
+      else
+         mButtons.PopUp(ETBSyncLockID);
+   };
+
+   mButtons.SetCustomEnableDisableButtonsAction(action);
+#endif
 }
 
 EditToolBar::~EditToolBar()
@@ -92,36 +150,15 @@ void EditToolBar::Create(wxWindow * parent)
 
 void EditToolBar::AddSeparator()
 {
-   AddSpacer();
+   mToolSizer->AddSpacer(0);
 }
 
-/// This is a convenience function that allows for button creation in
-/// MakeButtons() with fewer arguments
-/// Very similar to code in ControlToolBar...
-AButton *EditToolBar::AddButton(
-   EditToolBar *pBar,
+void EditToolBar::AddButton(
    teBmps eEnabledUp, teBmps eEnabledDown, teBmps eDisabled,
-   int id,
-   const TranslatableString &label,
-   bool toggle)
+   int id, const TranslatableString &label, bool toggle)
 {
-   AButton *&r = pBar->mButtons[id];
-
-   r = ToolBar::MakeButton(pBar,
-      bmpRecoloredUpSmall, bmpRecoloredDownSmall, bmpRecoloredUpHiliteSmall, bmpRecoloredHiliteSmall,
-      eEnabledUp, eEnabledDown, eDisabled,
-      wxWindowID(id+first_ETB_ID),
-      wxDefaultPosition,
-      toggle,
-      theTheme.ImageSize( bmpRecoloredUpSmall ));
-
-   r->SetLabel(label);
-// JKC: Unlike ControlToolBar, does not have a focus rect.  Shouldn't it?
-// r->SetFocusRect( r->GetRect().Deflate( 4, 4 ) );
-
-   pBar->Add( r, 0, wxALIGN_CENTER );
-
-   return r;
+   auto r = mButtons.CreateButton(eEnabledUp, eEnabledDown, eDisabled, id, label, toggle);
+   mToolSizer->Add(r);
 }
 
 void EditToolBar::Populate()
@@ -129,71 +166,49 @@ void EditToolBar::Populate()
    SetBackgroundColour( theTheme.Colour( clrMedium  ) );
    MakeButtonBackgroundsSmall();
 
+   Add(mToolSizer = safenew wxGridSizer(2, 5, 1, 1));
+
    /* Buttons */
-   // Tooltips slightly more verbose than the menu entries are.
-   AddButton(this, bmpCut, bmpCut, bmpCutDisabled, ETBCutID,
-      XO("Cut selection"));
-   AddButton(this, bmpCopy, bmpCopy, bmpCopyDisabled, ETBCopyID,
-      XO("Copy selection"));
-   AddButton(this, bmpPaste, bmpPaste, bmpPasteDisabled, ETBPasteID,
-      XO("Paste"));
-   AddButton(this, bmpTrim, bmpTrim, bmpTrimDisabled, ETBTrimID,
-      XO("Trim audio outside selection"));
-   AddButton(this, bmpSilence, bmpSilence, bmpSilenceDisabled, ETBSilenceID,
-      XO("Silence audio selection"));
-
-   AddSeparator();
-
-   AddButton(this, bmpUndo, bmpUndo, bmpUndoDisabled, ETBUndoID,
-      XO("Undo"));
-   AddButton(this, bmpRedo, bmpRedo, bmpRedoDisabled, ETBRedoID,
-      XO("Redo"));
-
-   AddSeparator();
-
-#ifdef OPTION_SYNC_LOCK_BUTTON
-   AddButton(this, bmpSyncLockTracksUp, bmpSyncLockTracksDown, bmpSyncLockTracksUp, ETBSyncLockID,
-               XO("Sync-Lock Tracks"), true);
-
-   AddSeparator();
-#endif
-
    // Tooltips match menu entries.
    // We previously had longer tooltips which were not more clear.
-   AddButton(this, bmpZoomIn, bmpZoomIn, bmpZoomInDisabled, ETBZoomInID,
+   AddButton(bmpZoomIn, bmpZoomIn, bmpZoomInDisabled, ETBZoomInID,
       XO("Zoom In"));
-   AddButton(this, bmpZoomOut, bmpZoomOut, bmpZoomOutDisabled, ETBZoomOutID,
+   AddButton(bmpZoomOut, bmpZoomOut, bmpZoomOutDisabled, ETBZoomOutID,
       XO("Zoom Out"));
-   AddButton(this, bmpZoomSel, bmpZoomSel, bmpZoomSelDisabled, ETBZoomSelID,
+   AddButton(bmpZoomSel, bmpZoomSel, bmpZoomSelDisabled, ETBZoomSelID,
       XO("Zoom to Selection"));
-   AddButton(this, bmpZoomFit, bmpZoomFit, bmpZoomFitDisabled, ETBZoomFitID,
+   AddButton(bmpZoomFit, bmpZoomFit, bmpZoomFitDisabled, ETBZoomFitID,
       XO("Fit to Width"));
-
-#ifdef EXPERIMENTAL_ZOOM_TOGGLE_BUTTON
-   AddButton(this, bmpZoomToggle, bmpZoomToggle, bmpZoomToggleDisabled, ETBZoomToggleID,
+   AddButton(bmpZoomToggle, bmpZoomToggle, bmpZoomToggleDisabled, ETBZoomToggleID,
       XO("Zoom Toggle"));
-#endif
 
-
-
-   mButtons[ETBZoomInID]->SetEnabled(false);
-   mButtons[ETBZoomOutID]->SetEnabled(false);
-#ifdef EXPERIMENTAL_ZOOM_TOGGLE_BUTTON
-   mButtons[ETBZoomToggleID]->SetEnabled(false);
-#endif
-
-   mButtons[ETBZoomSelID]->SetEnabled(false);
-   mButtons[ETBZoomFitID]->SetEnabled(false);
-   mButtons[ETBPasteID]->SetEnabled(false);
+   // Tooltips slightly more verbose than the menu entries are.
+   AddButton(bmpTrim, bmpTrim, bmpTrimDisabled, ETBTrimID,
+      XO("Trim audio outside selection"));
+   AddButton(bmpSilence, bmpSilence, bmpSilenceDisabled, ETBSilenceID,
+      XO("Silence audio selection"));
 
 #ifdef OPTION_SYNC_LOCK_BUTTON
-   mButtons[ETBSyncLockID]->PushDown();
+   AddButton(bmpSyncLockTracksUp, bmpSyncLockTracksDown, bmpSyncLockTracksUp, ETBSyncLockID,
+      XO("Sync-Lock Tracks"), true);
+#else
+   AddSeparator();
 #endif
 
-#if defined(EXPERIMENTAL_EFFECTS_RACK)
-   AddSeparator();
-   AddButton(this, bmpEditEffects, bmpEditEffects, bmpEditEffects, ETBEffectsID,
-      XO("Show Effects Rack"), true);
+   AddButton(bmpUndo, bmpUndo, bmpUndoDisabled, ETBUndoID,
+      XO("Undo"));
+   AddButton(bmpRedo, bmpRedo, bmpRedoDisabled, ETBRedoID,
+      XO("Redo"));
+
+   mButtons.SetEnabled(ETBZoomInID, false);
+   mButtons.SetEnabled(ETBZoomOutID, false);
+   mButtons.SetEnabled(ETBZoomToggleID, false);
+
+   mButtons.SetEnabled(ETBZoomSelID, false);
+   mButtons.SetEnabled(ETBZoomFitID, false);
+
+#ifdef OPTION_SYNC_LOCK_BUTTON
+   mButtons.PushDown(ETBSyncLockID);
 #endif
 
    RegenerateTooltips();
@@ -212,107 +227,20 @@ void EditToolBar::UpdatePrefs()
 
 void EditToolBar::RegenerateTooltips()
 {
-   ForAllButtons( ETBActTooltips );
+   mButtons.RegenerateTooltips();
 }
 
 void EditToolBar::EnableDisableButtons()
 {
-   ForAllButtons( ETBActEnableDisable );
-}
-
-
-static const struct Entry {
-   int tool;
-   CommandID commandName;
-   TranslatableString untranslatedLabel;
-} EditToolbarButtonList[] = {
-   { ETBCutID,      wxT("Cut"),         XO("Cut")  },
-   { ETBCopyID,     wxT("Copy"),        XO("Copy")  },
-   { ETBPasteID,    wxT("Paste"),       XO("Paste")  },
-   { ETBTrimID,     wxT("Trim"),        XO("Trim audio outside selection")  },
-   { ETBSilenceID,  wxT("Silence"),     XO("Silence audio selection")  },
-   { ETBUndoID,     wxT("Undo"),        XO("Undo")  },
-   { ETBRedoID,     wxT("Redo"),        XO("Redo")  },
-
-#ifdef OPTION_SYNC_LOCK_BUTTON
-   { ETBSyncLockID, wxT("SyncLock"),    XO("Sync-Lock Tracks")  },
-#endif
-
-   { ETBZoomInID,   wxT("ZoomIn"),      XO("Zoom In")  },
-   { ETBZoomOutID,  wxT("ZoomOut"),     XO("Zoom Out")  },
-#ifdef EXPERIMENTAL_ZOOM_TOGGLE_BUTTON
-   { ETBZoomToggleID,   wxT("ZoomToggle"),      XO("Zoom Toggle")  },
-#endif 
-   { ETBZoomSelID,  wxT("ZoomSel"),     XO("Fit selection to width")  },
-   { ETBZoomFitID,  wxT("FitInWindow"), XO("Fit project to width")  },
-
-#if defined(EXPERIMENTAL_EFFECTS_RACK)
-   { ETBEffectsID,  wxT("ShowEffectsRack"), XO("Open Effects Rack")  },
-#endif
-};
-
-
-void EditToolBar::ForAllButtons(int Action)
-{
-   AudacityProject *p;
-   CommandManager* cm = nullptr;
-
-   if( Action & ETBActEnableDisable ){
-      p = &mProject;
-      cm = &CommandManager::Get( *p );
-#ifdef OPTION_SYNC_LOCK_BUTTON
-      bool bSyncLockTracks;
-      gPrefs->Read(wxT("/GUI/SyncLockTracks"), &bSyncLockTracks, false);
-
-      if (bSyncLockTracks)
-         mButtons[ETBSyncLockID]->PushDown();
-      else
-         mButtons[ETBSyncLockID]->PopUp();
-#endif
-   }
-
-
-   for (const auto &entry : EditToolbarButtonList) {
-#if wxUSE_TOOLTIPS
-      if( Action & ETBActTooltips ){
-         ComponentInterfaceSymbol command{
-            entry.commandName, entry.untranslatedLabel };
-         ToolBar::SetButtonToolTip( mProject,
-            *mButtons[entry.tool], &command, 1u );
-      }
-#endif
-      if (cm) {
-         mButtons[entry.tool]->SetEnabled(cm->GetEnabled(entry.commandName));
-      }
-   }
+   mButtons.EnableDisableButtons();
 }
 
 void EditToolBar::OnButton(wxCommandEvent &event)
 {
-   int id = event.GetId()-first_ETB_ID;
-   // Be sure the pop-up happens even if there are exceptions, except for buttons which toggle.
-   auto cleanup = finally( [&] { mButtons[id]->InteractionOver();});
-
-   AudacityProject *p = &mProject;
-   auto &cm = CommandManager::Get( *p );
-
-   auto flags = MenuManager::Get(*p).GetUpdateFlags();
-   const CommandContext context( *p );
-   MacroCommands::HandleTextualCommand( cm,
-      EditToolbarButtonList[id].commandName, context, flags, false);
-
-#if defined(__WXMAC__)
-   // Bug 2402
-   // LLL: It seems that on the Mac the IDLE events are processed
-   //      differently than on Windows/GTK and the AdornedRulerPanel's
-   //      OnPaint() method gets called sooner that expected. This is
-   //      evident when zooming from this toolbar only. When zooming from
-   //      the Menu or from keyboard ommand, the zooming works correctly.
-   wxTheApp->ProcessIdle();
-#endif
+   mButtons.OnButton(event);
 }
 
-static RegisteredToolbarFactory factory{ EditBarID,
+static RegisteredToolbarFactory factory{
    []( AudacityProject &project ){
       return ToolBar::Holder{ safenew EditToolBar{ project } }; }
 };
@@ -322,7 +250,7 @@ static RegisteredToolbarFactory factory{ EditBarID,
 namespace {
 AttachedToolBarMenuItem sAttachment{
    /* i18n-hint: Clicking this menu item shows the toolbar for editing */
-   EditBarID, wxT("ShowEditTB"), XXO("&Edit Toolbar")
+   EditToolBar::ID(), wxT("ShowEditTB"), XXO("&Edit Toolbar")
 };
 }
 

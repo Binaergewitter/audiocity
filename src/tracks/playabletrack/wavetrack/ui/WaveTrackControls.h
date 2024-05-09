@@ -12,18 +12,20 @@ Paul Licameli split from TrackPanel.cpp
 #define __AUDACITY_WAVE_TRACK_CONTROLS__
 
 #include "../../ui/PlayableTrackControls.h" // to inherit
+#include "Observer.h"
 
 class CellularPanel;
 class LWSlider;
 class MuteButtonHandle;
 class SoloButtonHandle;
+class EffectsButtonHandle;
 class GainSliderHandle;
 class PanSliderHandle;
 class WaveTrack;
 class wxEvent;
 class wxWindow;
 
-class WaveTrackControls final : public PlayableTrackControls
+class AUDACITY_DLL_API WaveTrackControls final : public PlayableTrackControls
 {
    WaveTrackControls(const WaveTrackControls&) = delete;
    WaveTrackControls &operator=(const WaveTrackControls&) = delete;
@@ -32,7 +34,7 @@ public:
    explicit
    WaveTrackControls( std::shared_ptr<Track> pTrack )
       : PlayableTrackControls( pTrack ) {}
-   ~WaveTrackControls();
+   ~WaveTrackControls() override;
 
    std::vector<UIHandlePtr> HitTest
       (const TrackPanelMouseState &state,
@@ -59,18 +61,19 @@ public:
    static void ReCreateSliders();
 
 private:
-   static void ReCreatePanSlider( wxEvent& );
-   static void ReCreateGainSlider( wxEvent& );
+   static void ReCreatePanSlider(struct ThemeChangeMessage);
+   static void ReCreateGainSlider(struct ThemeChangeMessage);
 
    std::weak_ptr<MuteButtonHandle> mMuteHandle;
    std::weak_ptr<SoloButtonHandle> mSoloHandle;
+   std::weak_ptr<EffectsButtonHandle> mEffectsHandle;
    std::weak_ptr<GainSliderHandle> mGainHandle;
    std::weak_ptr<PanSliderHandle> mPanHandle;
 };
 
 #include "../../../../widgets/PopupMenuTable.h"
 
-struct WaveTrackPopupMenuTable : public PopupMenuTable
+struct AUDACITY_DLL_API WaveTrackPopupMenuTable : public PopupMenuTable
 {
    using PopupMenuTable::PopupMenuTable;
    PlayableTrackControls::InitMenuData *mpData{};
@@ -81,6 +84,7 @@ protected:
 };
 
 // Expose the wave track menu table to registration of menu items
+AUDACITY_DLL_API
 WaveTrackPopupMenuTable &GetWaveTrackMenuTable();
 
 #endif

@@ -18,15 +18,11 @@ It would be nice to create a NEW 'Bindings' class which both
 KeyConfigPrefs and MousePrefs use.
 
 *//*********************************************************************/
-
-#include "../Audacity.h"
-
 #include "KeyConfigPrefs.h"
 
 #include <wx/setup.h> // for wxUSE_* macros
 #include <wx/defs.h>
 #include <wx/ffile.h>
-#include <wx/intl.h>
 #include <wx/menu.h>
 #include <wx/button.h>
 #include <wx/radiobut.h>
@@ -34,20 +30,25 @@ KeyConfigPrefs and MousePrefs use.
 #include <wx/statbox.h>
 #include <wx/textctrl.h>
 
-#include "../Prefs.h"
-#include "../Project.h"
-#include "../commands/CommandManager.h"
-#include "../xml/XMLFileReader.h"
+#include "ActiveProject.h"
+#include "MenuCreator.h" // for KeyEventToKeyString
+#include "Prefs.h"
+#include "Project.h"
+#include "../ProjectWindows.h"
+#include "XMLFileReader.h"
 
-#include "../ShuttleGui.h"
+#include "SelectFile.h"
+#include "ShuttleGui.h"
 
-#include "../FileNames.h"
+#include "FileNames.h"
 
+#include "../widgets/BasicMenu.h"
 #include "../widgets/KeyView.h"
-#include "../widgets/AudacityMessageBox.h"
+#include "AudacityMessageBox.h"
+#include "wxWidgetsWindowPlacement.h"
 
 #if wxUSE_ACCESSIBILITY
-#include "../widgets/WindowAccessible.h"
+#include "WindowAccessible.h"
 #endif
 
 //
@@ -87,8 +88,7 @@ END_EVENT_TABLE()
 KeyConfigPrefs::KeyConfigPrefs(
    wxWindow * parent, wxWindowID winid, AudacityProject *pProject,
    const CommandID &name)
-/* i18n-hint: as in computer keyboard (not musical!) */
-:  PrefsPanel(parent, winid, XO("Keyboard")),
+:  PrefsPanel(parent, winid, XO("Shortcuts")),
    mView(NULL),
    mKey(NULL),
    mFilter(NULL),
@@ -107,17 +107,17 @@ KeyConfigPrefs::KeyConfigPrefs(
    Bind(wxEVT_SHOW, &KeyConfigPrefs::OnShow, this);
 }
 
-ComponentInterfaceSymbol KeyConfigPrefs::GetSymbol()
+ComponentInterfaceSymbol KeyConfigPrefs::GetSymbol() const
 {
    return KEY_CONFIG_PREFS_PLUGIN_SYMBOL;
 }
 
-TranslatableString KeyConfigPrefs::GetDescription()
+TranslatableString KeyConfigPrefs::GetDescription() const
 {
    return XO("Preferences for KeyConfig");
 }
 
-wxString KeyConfigPrefs::HelpPageName()
+ManualPageID KeyConfigPrefs::HelpPageName()
 {
    return "Keyboard_Preferences";
 }
@@ -172,6 +172,15 @@ void KeyConfigPrefs::Populate()
 /// so this is only used in populating the panel.
 void KeyConfigPrefs::PopulateOrExchange(ShuttleGui & S)
 {
+   ChoiceSetting Setting{ L"/Prefs/KeyConfig/ViewBy",
+      {
+         { wxT("tree"), XXO("&Tree") },
+         { wxT("name"), XXO("&Name") },
+         { wxT("key"), XXO("&Key") },
+      },
+      0 // tree
+   };
+
    S.SetBorder(2);
 
    S.StartStatic(XO("Key Bindings"), 1);
@@ -186,15 +195,7 @@ void KeyConfigPrefs::PopulateOrExchange(ShuttleGui & S)
          {
             S.StartHorizontalLay();
             {
-               S.StartRadioButtonGroup({
-                  wxT("/Prefs/KeyConfig/ViewBy"),
-                  {
-                     { wxT("tree"), XXO("&Tree") },
-                     { wxT("name"), XXO("&Name") },
-                     { wxT("key"), XXO("&Key") },
-                  },
-                  0 // tree
-               });
+               S.StartRadioButtonGroup(Setting);
                {
                   mViewByTree = S.Id(ViewByTreeID)
                      .Name(XO("View by tree"))
@@ -475,7 +476,9 @@ void KeyConfigPrefs::OnShow(wxShowEvent & event)
 {
    event.Skip();
 
-   if (event.IsShown())
+   // This is required to prevent a crash if Preferences 
+   // were opened without a project.
+   if (event.IsShown() && mView != nullptr)
    {
       mView->Refresh();
    }
@@ -485,7 +488,7 @@ void KeyConfigPrefs::OnImport(wxCommandEvent & WXUNUSED(event))
 {
    wxString file = wxT("Audacity-keys.xml");
 
-   file = FileNames::SelectFile(FileNames::Operation::Open,
+   file = SelectFile(FileNames::Operation::Open,
       XO("Select an XML file containing Audacity keyboard shortcuts..."),
       wxEmptyString,
       file,
@@ -564,7 +567,7 @@ void KeyConfigPrefs::OnExport(wxCommandEvent & WXUNUSED(event))
 {
    wxString file = wxT("Audacity-keys.xml");
 
-   file = FileNames::SelectFile(FileNames::Operation::Export,
+   file = SelectFile(FileNames::Operation::Export,
       XO("Export Keyboard Shortcuts As:"),
       wxEmptyString,
       file,
@@ -594,8 +597,7 @@ void KeyConfigPrefs::OnDefaults(wxCommandEvent & WXUNUSED(event))
    Menu.Append( 1, _("Standard") );
    Menu.Append( 2, _("Full") );
    Menu.Bind( wxEVT_COMMAND_MENU_SELECTED, &KeyConfigPrefs::OnImportDefaults, this );
-   // Pop it up where the mouse is.
-   PopupMenu(&Menu);//, wxPoint(0, 0));
+   BasicMenu::Handle( &Menu ).Popup( wxWidgetsWindowPlacement{ this } );
 }
 
 void KeyConfigPrefs::FilterKeys( std::vector<NormalizedKeyString> & arr )

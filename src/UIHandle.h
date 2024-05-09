@@ -12,7 +12,8 @@ Paul Licameli
 #define __AUDACITY_UI_HANDLE__
 
 #include <utility>
-#include "MemoryX.h"
+#include <memory>
+#include <typeinfo>
 #include "TrackPanelDrawable.h" // to inherit
 
 class wxDC;
@@ -21,18 +22,18 @@ class wxRegion;
 class wxWindow;
 
 class AudacityProject;
+class Channel;
 struct HitTestPreview;
+class Track;
 class TrackPanelCell;
 struct TrackPanelMouseEvent;
 struct TrackPanelMouseState;
-
-#include "MemoryX.h"
 
 /// \brief Short-lived drawing and event-handling object associated with a TrackPanelCell
 // A TrackPanelCell reports a handle object of some subclass, in response to a
 // hit test at a mouse position; then this handle processes certain events,
 // and maintains necessary state through click-drag-release event sequences.
-class UIHandle /* not final */ : public TrackPanelDrawable
+class AUDACITY_DLL_API UIHandle /* not final */ : public TrackPanelDrawable
 {
 public:
    // See RefreshCode.h for bit flags:
@@ -61,11 +62,16 @@ public:
    // Tell whether the handle has its own escape action.  In case it is already
    // clicked, it will not cancel on Escape key if true.
    // Default is always false.
-   virtual bool HasEscape() const;
+   virtual bool HasEscape(AudacityProject *pProject) const;
 
    // The handle may change state and mark itself for highlight change.
    // Default does nothing and returns false
    virtual bool Escape(AudacityProject *pProject);
+
+   //! Whether the handle has any special right-button handling
+   /*! If not, then Click() will not be called for right click.
+       Default is always false */
+   virtual bool HandlesRightClick();
 
    // Assume hit test (implemented in other classes) was positive.
    // May return Cancelled, overriding the hit test decision and stopping drag.
@@ -114,6 +120,13 @@ public:
    // use?
    virtual void OnProjectChange(AudacityProject *pProject);
 
+   //! @return pointer to associated track, if any
+   virtual std::shared_ptr<const Track> FindTrack() const = 0;
+
+   //! Whether the handle is dragging, affecting other panel painting;
+   //! default returns false
+   virtual bool IsDragging() const;
+
 public:
    Result GetChangeHighlight() const { return mChangeHighlight; }
    void SetChangeHighlight(Result val) { mChangeHighlight = val; }
@@ -127,6 +140,10 @@ public:
    {
       return 0;
    }
+
+   //! A frequent convenience in the definition of UIHandles
+   static std::shared_ptr<const Track>
+   TrackFromChannel(const std::shared_ptr<const Channel> &pChannel);
 
 protected:
    // Derived classes can set this nonzero in a constructor, which is enough
@@ -156,6 +173,9 @@ std::shared_ptr<Subclass> AssignUIHandlePtr
       return pNew;
    }
    else {
+      //type slicing check
+      wxASSERT(typeid(*ptr) == typeid(*pNew));
+
       auto code = Subclass::NeedChangeHighlight( *ptr, *pNew );
       *ptr = std::move(*pNew);
       ptr->SetChangeHighlight( code );
